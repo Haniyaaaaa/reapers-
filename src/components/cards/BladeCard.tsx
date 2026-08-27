@@ -1,8 +1,8 @@
 import { ReactNode } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { radius, shadows, useTheme } from '../../theme';
 
-export function BladeCard({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+export function BladeCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   const { colors } = useTheme();
   return (
     <View

@@ -33,6 +33,10 @@ export function ProfileScreen() {
   const profile = isOwn ? user : other;
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [displayName, setDisplayName] = useState(profile?.displayName ?? '');
+  const [username, setUsername] = useState(profile?.username ?? '');
+  const [nameErr, setNameErr] = useState('');
+  const [userErr, setUserErr] = useState('');
   const [bio, setBio] = useState(profile?.bio ?? '');
   const [roles, setRoles] = useState<Role[]>(profile?.roles ?? []);
   const [skills, setSkills] = useState(profile?.skills ?? profile?.tags ?? []);
@@ -48,8 +52,21 @@ export function ProfileScreen() {
     [demos, isOwn, user, params?.id],
   );
 
+  const nameOk = displayName.trim().length >= 2;
+  const userOk = username.trim().length >= 3;
+
   const save = async () => {
+    if (!nameOk) {
+      setNameErr('Name needs 2+ characters');
+      return;
+    }
+    if (!userOk) {
+      setUserErr('Username needs 3+ characters');
+      return;
+    }
     await completeOnboarding({
+      displayName: displayName.trim(),
+      username: username.trim(),
       bio,
       roles,
       skills,
@@ -64,6 +81,10 @@ export function ProfileScreen() {
     setDirty(false);
     setSaveMsg('Saved');
   };
+
+  const isEditingOwn = editing && isOwn;
+  const shownName = (isEditingOwn ? displayName : profile?.displayName) ?? '';
+  const shownUsername = (isEditingOwn ? username : profile?.username) ?? '';
 
   const conn = peopleCards.find((p) => p.id === params?.id)?.connect ?? 'connect';
   const openLink = (url: string) => {
@@ -87,10 +108,10 @@ export function ProfileScreen() {
       {dirty ? <Text style={{ color: colors.warning, fontFamily: fonts.bodyMed, marginBottom: 8 }}>Unsaved changes</Text> : null}
       {saveMsg ? <Text style={{ color: colors.online, fontFamily: fonts.bodyMed, marginBottom: 8 }}>{saveMsg}</Text> : null}
       <View style={styles.header}>
-        <AvatarRing name={profile?.displayName ?? 'R'} size={88} uri={avatar} avatarId={avatarId} look={avatarLook} />
+        <AvatarRing name={shownName || 'R'} size={88} uri={avatar} avatarId={avatarId} look={avatarLook} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.name, { color: colors.text }]}>{profile?.displayName}</Text>
-          <Text style={{ color: colors.muted, fontFamily: fonts.body }}>@{profile?.username}</Text>
+          <Text style={[styles.name, { color: colors.text }]}>{shownName}</Text>
+          <Text style={{ color: colors.muted, fontFamily: fonts.body }}>@{shownUsername}</Text>
           <View style={styles.badges}>
             {(profile?.roles ?? []).map((r) => (
               <View key={r} style={[styles.badge, { backgroundColor: colors.tealMuted }]}>
@@ -104,6 +125,37 @@ export function ProfileScreen() {
 
       {editing && isOwn ? (
         <>
+          <AuthTextField
+            label="Display name"
+            value={displayName}
+            onChangeText={(v) => {
+              setDisplayName(v);
+              setNameErr('');
+              setDirty(true);
+            }}
+            error={nameErr}
+            maxLength={30}
+            showCount
+            placeholder="Hira Fatima"
+            onBlur={() => setNameErr(displayName.trim().length < 2 ? 'Name needs 2+ characters' : '')}
+          />
+          <AuthTextField
+            label="Username"
+            value={username}
+            onChangeText={(v) => {
+              setUsername(v.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase());
+              setUserErr('');
+              setDirty(true);
+            }}
+            error={userErr}
+            maxLength={20}
+            showCount
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="hirafatima"
+            hint="Letters, numbers, dots, dashes and underscores."
+            onBlur={() => setUserErr(username.trim().length < 3 ? 'Username needs 3+ characters' : '')}
+          />
           <Text style={{ color: colors.muted, fontFamily: fonts.bodyMed, marginBottom: 10 }}>Gamer avatar</Text>
           <AvatarPicker
             selectedId={avatarId}
@@ -172,7 +224,29 @@ export function ProfileScreen() {
               setDirty(true);
             }}
           />
-          <PrimaryButton label="Save profile" onPress={save} style={{ marginTop: 16 }} />
+          <PrimaryButton label="Save profile" onPress={save} disabled={!nameOk || !userOk} style={{ marginTop: 16 }} />
+          <Pressable
+            onPress={() => {
+              setDisplayName(profile?.displayName ?? '');
+              setUsername(profile?.username ?? '');
+              setBio(profile?.bio ?? '');
+              setRoles(profile?.roles ?? []);
+              setSkills(profile?.skills ?? profile?.tags ?? []);
+              setAvatar(profile?.avatarUri);
+              setAvatarId(profile?.avatarId ?? 'reaper');
+              setAvatarLook(profile?.avatarLook);
+              setPortfolioUrl(profile?.portfolioUrl ?? '');
+              setLinkedinUrl(profile?.linkedinUrl ?? '');
+              setNameErr('');
+              setUserErr('');
+              setDirty(false);
+              setEditing(false);
+            }}
+            style={[styles.cancel, { borderColor: colors.border }]}
+            accessibilityRole="button"
+          >
+            <Text style={{ color: colors.muted, fontFamily: fonts.bodyMed }}>Cancel</Text>
+          </Pressable>
         </>
       ) : (
         <>
@@ -241,6 +315,7 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 8, marginVertical: 12 },
   msg: { minHeight: 44, paddingHorizontal: 16, borderRadius: radius.pill, borderWidth: 1, justifyContent: 'center' },
   linkRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cancel: { minHeight: 48, borderRadius: radius.pill, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   h2: { fontFamily: fonts.display, fontSize: 20, marginTop: 20, marginBottom: 10 },
   icon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });
