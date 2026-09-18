@@ -1,59 +1,139 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { CompositeNavigationProp } from '@react-navigation/native';
-import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { MainStackParamList, TabParamList } from '../../../navigation/types';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
+
+import type { MainStackParamList } from '../../../navigation/types';
 import { ChatroomRow } from '../../../components/cards/ChatroomRow';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { EmptyState } from '../../../components/feedback/EmptyState';
+import { GuidelinesSheet } from '../../../components/feedback/GuidelinesSheet';
+import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
+import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
+import { RetryBanner } from '../../../components/feedback/RetryBanner';
 import { Skeleton } from '../../../components/feedback/Skeleton';
-import { SearchBar } from '../../../components/inputs/SearchBar';
-import { Screen } from '../../../components/layout/Screen';
+import { CyberBackground } from '../../../components/cyber/CyberBackground';
+import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
-import { useFakeLoad } from '../../../hooks/useFakeLoad';
-import { useCommunityStore } from '../../../store/communityStore';
-import { fonts, radius, useTheme } from '../../../theme';
-import { Ionicons } from '@expo/vector-icons';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
+import { useAuth } from '../../../hooks/useAuth';
+import { useChatStore } from '../../../store/chatStore';
+import { useUiStore } from '../../../store/uiStore';
+import { listConnectedPeople } from '../../../services/supabase/network';
+import { fonts, useTheme } from '../../../theme';
 import type { Chatroom } from '../../../types/chat';
+import type { PersonCard } from '../../../types/extra';
 import { brandLogo } from '../../../data/brand';
 import { communityLogos } from '../../../data/communityLogos';
 import { avatarUriFor } from '../../../data/gamerAvatars';
+import { getCyberAvatarSource } from '../../../data/cyberAvatars';
 
-type Nav = CompositeNavigationProp<
-  BottomTabNavigationProp<TabParamList, 'ChatTab'>,
-  NativeStackNavigationProp<MainStackParamList>
->;
+type Nav = NativeStackNavigationProp<MainStackParamList>;
 
-type Guild = { id: string; name: string; logo?: Chatroom['logo']; uri?: string };
+type FilterTab = 'ALL' | 'UNREAD' | 'ROOMS' | 'DMS';
 
 export function ChatDirectoryScreen() {
   const nav = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
-  const { phase } = useFakeLoad();
-  const rooms = useCommunityStore((s) => s.rooms);
-  const joinRoom = useCommunityStore((s) => s.joinRoom);
+  const { user } = useAuth();
+
+  const rooms = useChatStore((s) => s.rooms);
+  const roomsHasMore = useChatStore((s) => s.roomsHasMore);
+  const loading = useChatStore((s) => s.roomsLoading);
+  const error = useChatStore((s) => s.roomsError);
+  const fetchRooms = useChatStore((s) => s.fetchRooms);
+  const loadMoreRooms = useChatStore((s) => s.loadMoreRooms);
+  const joinRoom = useChatStore((s) => s.joinRoom);
+  const requestToJoinRoom = useChatStore((s) => s.requestToJoinRoom);
+  const startDirectMessage = useChatStore((s) => s.startDirectMessage);
+
   const [q, setQ] = useState('');
   const dq = useDebouncedValue(q);
-  const [guild, setGuild] = useState('reapers');
+  const [activeTab, setActiveTab] = useState<FilterTab>('ALL');
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [guidelinesTargetId, setGuidelinesTargetId] = useState<string | null>(null);
+  const [requestSent, setRequestSent] = useState(false);
+  const [joinErr, setJoinErr] = useState('');
+  const seenGuidelines = useUiStore((s) => s.seenGuidelines);
+  const markGuidelinesSeen = useUiStore((s) => s.markGuidelinesSeen);
+  const [newMessageOpen, setNewMessageOpen] = useState(false);
+  const [startingDmId, setStartingDmId] = useState<string | null>(null);
 
-  const guilds: Guild[] = useMemo(
-    () => [
-      { id: 'reapers', name: 'Reapers', logo: brandLogo },
-      { id: 'dms', name: 'DMs' },
-      ...rooms.filter((r) => r.kind === 'server').map((r) => ({ id: r.id, name: r.name, uri: avatarUriFor(undefined, r.name) })),
-      ...rooms
-        .filter((r) => r.communityId)
-        .map((r) => ({
-          id: r.id,
-          name: r.name,
-          logo: r.logo ?? communityLogos.cega,
-        })),
-    ],
-    [rooms],
-  );
+  // Connected-people search for the "New Message" sheet — a real, paginated/searchable
+  // server-side query (see listConnectedPeople), not the ~100-person discovery directory,
+  // so it scales correctly no matter how many connections someone actually has.
+  const [dmSearch, setDmSearch] = useState('');
+  const dmSearchDq = useDebouncedValue(dmSearch);
+  const [connections, setConnections] = useState<PersonCard[]>([]);
+  const [connectionsLoading, setConnectionsLoading] = useState(false);
+  const [connectionsHasMore, setConnectionsHasMore] = useState(false);
+
+  useEffect(() => {
+    if (user) fetchRooms(user.id);
+  }, [user, fetchRooms]);
+
+  useEffect(() => {
+    if (!newMessageOpen || !user) return;
+    let cancelled = false;
+    setConnectionsLoading(true);
+    listConnectedPeople(user.id, { search: dmSearchDq })
+      .then((page) => {
+        if (cancelled) return;
+        setConnections(page.rows);
+        setConnectionsHasMore(page.hasMore);
+      })
+      .finally(() => {
+        if (!cancelled) setConnectionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [newMessageOpen, user, dmSearchDq]);
+
+  const loadMoreConnections = async () => {
+    if (!user || connectionsLoading) return;
+    setConnectionsLoading(true);
+    try {
+      const page = await listConnectedPeople(user.id, { search: dmSearchDq, offset: connections.length });
+      setConnections((prev) => [...prev, ...page.rows]);
+      setConnectionsHasMore(page.hasMore);
+    } finally {
+      setConnectionsLoading(false);
+    }
+  };
+
+  const openDm = async (personId: string, displayName: string) => {
+    if (!user || startingDmId) return;
+    setStartingDmId(personId);
+    try {
+      const roomId = await startDirectMessage(user.id, personId, displayName);
+      setNewMessageOpen(false);
+      nav.navigate('ChatDetail', { id: roomId });
+    } finally {
+      setStartingDmId(null);
+    }
+  };
+
+  const refreshControl = useRefreshControl(async () => {
+    if (user) await fetchRooms(user.id);
+  });
+
+  const unreadCount = useMemo(() => rooms.reduce((acc, r) => acc + (r.unread || 0), 0), [rooms]);
+  const teamThreadsCount = useMemo(() => rooms.filter((r) => r.kind === 'server' || r.kind === 'room').length, [rooms]);
 
   const filtered = useMemo(() => {
     const needle = dq.trim().toLowerCase();
@@ -64,115 +144,484 @@ export function ChatDirectoryScreen() {
         r.description.toLowerCase().includes(needle) ||
         (r.serverRegion?.toLowerCase().includes(needle) ?? false);
       if (!matchQ) return false;
-      if (guild === 'reapers') return r.kind === 'global' || r.kind === 'room';
-      if (guild === 'dms') return r.kind === 'dm';
-      return r.id === guild;
+      if (activeTab === 'UNREAD') return r.unread > 0;
+      if (activeTab === 'ROOMS') return r.kind === 'room' || r.kind === 'server';
+      if (activeTab === 'DMS') return r.kind === 'dm';
+      return true;
     });
-  }, [rooms, dq, guild]);
+  }, [rooms, dq, activeTab]);
 
   const pending = rooms.find((r) => r.id === pendingId);
   const open = (r: Chatroom) => {
-    if (r.joined) nav.navigate('ChatDetail', { id: r.id });
-    else setPendingId(r.id);
+    if (r.joined) {
+      nav.navigate('ChatDetail', { id: r.id });
+    } else if (!seenGuidelines[r.id]) {
+      setGuidelinesTargetId(r.id);
+    } else {
+      setPendingId(r.id);
+    }
   };
 
   return (
-    <Screen>
-      <View style={styles.top}>
-        <View>
-          <Text style={[styles.h, { color: colors.text }]}>Chat</Text>
-          <Text style={{ color: colors.muted, fontFamily: fonts.body, marginTop: 4 }}>Servers, communities, and general</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <CyberBackground showArtwork={false} />
+
+      {/* Top Header Bar */}
+      <View style={[styles.headerBar, { paddingTop: insets.top + 8 }]}>
+        <Pressable onPress={() => nav.goBack()} style={styles.headerBtn} accessibilityRole="button">
+          <CyberCutBox
+            cutSize={8}
+            radius={4}
+            fill={colors.cardFill}
+            borderColor={colors.cardBorder}
+            borderWidth={0.88}
+            style={styles.headerCutBox}
+          >
+            <Ionicons name="chevron-back" size={18} color={colors.text} />
+          </CyberCutBox>
+        </Pressable>
+
+        <View style={styles.headerTitleCol}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
+          <Text style={[styles.headerSub, { color: colors.muted }]}>
+            {unreadCount > 0 ? `${unreadCount} UNREAD` : '0 UNREAD'} · {teamThreadsCount} TEAM THREADS
+          </Text>
         </View>
-        <Pressable
-          onPress={() => nav.navigate('CreateRoom')}
-          style={[styles.fab, { backgroundColor: colors.magenta }]}
-          accessibilityRole="button"
-          accessibilityLabel="Create server"
-        >
-          <Ionicons name="add" size={22} color={colors.onPrimary} />
+
+        <Pressable onPress={() => setNewMessageOpen(true)} style={styles.headerBtn} accessibilityRole="button">
+          <CyberCutBox
+            cutSize={8}
+            radius={4}
+            fill={colors.cardFill}
+            borderColor={colors.cardBorder}
+            borderWidth={0.88}
+            style={styles.headerCutBox}
+          >
+            <Ionicons name="create-outline" size={18} color={colors.text} />
+          </CyberCutBox>
         </Pressable>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.guilds}>
-        {guilds.map((g) => {
-          const on = guild === g.id;
-          return (
-            <Pressable key={g.id} onPress={() => setGuild(g.id)} style={styles.guild} accessibilityRole="button" accessibilityState={{ selected: on }}>
-              <View
-                style={[
-                  styles.guildIcon,
-                  { borderColor: on ? colors.magenta : colors.border, backgroundColor: colors.surface },
-                ]}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
+      >
+        {/* Search Bar */}
+        <CyberCutBox
+          cutSize={10}
+          radius={6}
+          fill={colors.inputFill}
+          borderColor={colors.inputBorder}
+          borderWidth={0.88}
+          style={styles.searchCutBox}
+        >
+          <View style={styles.searchInputRow}>
+            <Ionicons name="search-outline" size={18} color={colors.muted2} />
+            <TextInput
+              value={q}
+              onChangeText={setQ}
+              placeholder="Search conversations"
+              placeholderTextColor={colors.muted2}
+              style={[styles.searchInput, { color: colors.text }]}
+            />
+            {q ? (
+              <Pressable onPress={() => setQ('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={16} color={colors.muted2} />
+              </Pressable>
+            ) : null}
+          </View>
+        </CyberCutBox>
+
+        {/* Filter Tabs (ALL / UNREAD / ROOMS / DMS) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTabsRow}>
+          {(['ALL', 'UNREAD', 'ROOMS', 'DMS'] as FilterTab[]).map((tab) => {
+            const active = activeTab === tab;
+            return (
+              <Pressable
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                style={styles.tabBtn}
+                accessibilityRole="button"
               >
-                {g.logo ? (
-                  <Image source={g.logo} style={styles.guildImg} />
-                ) : g.uri ? (
-                  <Image source={{ uri: g.uri }} style={styles.guildImg} />
-                ) : (
-                  <Ionicons name="chatbubbles" size={20} color={colors.cyan} />
-                )}
+                <CyberCutBox
+                  gradient={active}
+                  cutSize={8}
+                  radius={4}
+                  fill={active ? undefined : colors.cardFill}
+                  borderColor={active ? undefined : colors.cardBorder}
+                  borderWidth={active ? 0 : 0.88}
+                  style={styles.tabCutBox}
+                >
+                  <View style={styles.tabInner}>
+                    <Text style={[styles.tabText, active ? styles.tabTextActive : { color: colors.muted }]}>{tab}</Text>
+                  </View>
+                </CyberCutBox>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* Prominent Create Room CTA — shown whenever you're looking at rooms specifically,
+            not just the small pencil icon in the header, which is easy to miss. */}
+        {activeTab === 'ROOMS' ? (
+          <Pressable onPress={() => nav.navigate('CreateRoom')} style={styles.createRoomBtn} accessibilityRole="button">
+            <CyberCutBox gradient cutSize={8} radius={4} style={styles.createRoomCut}>
+              <View style={styles.createRoomInner}>
+                <Ionicons name="add" size={18} color="#FFFFFF" />
+                <Text style={styles.createRoomText}>Create Room</Text>
               </View>
-              <Text style={{ color: on ? colors.text : colors.muted, fontFamily: fonts.bodyMed, fontSize: 10 }} numberOfLines={1}>
-                {g.name}
-              </Text>
-            </Pressable>
-          );
-        })}
+            </CyberCutBox>
+          </Pressable>
+        ) : null}
+
+        {/* Prominent New Message CTA — mirrors Create Room above; lets you message any
+            connection directly instead of only ones you already have a thread with. */}
+        {activeTab === 'DMS' ? (
+          <Pressable onPress={() => setNewMessageOpen(true)} style={styles.createRoomBtn} accessibilityRole="button">
+            <CyberCutBox gradient cutSize={8} radius={4} style={styles.createRoomCut}>
+              <View style={styles.createRoomInner}>
+                <Ionicons name="add" size={18} color="#FFFFFF" />
+                <Text style={styles.createRoomText}>New Message</Text>
+              </View>
+            </CyberCutBox>
+          </Pressable>
+        ) : null}
+
+        {/* Loading Skeleton */}
+        {loading ? (
+          <View style={{ gap: 12 }}>
+            <Skeleton width="100%" height={74} />
+            <Skeleton width="100%" height={74} />
+            <Skeleton width="100%" height={74} />
+          </View>
+        ) : null}
+
+        {/* Error Retry Banner */}
+        {!loading && error ? <RetryBanner onRetry={() => user && fetchRooms(user.id)} /> : null}
+
+        {/* Empty State */}
+        {!loading && !error && filtered.length === 0 ? (
+          activeTab === 'ROOMS' ? (
+            <EmptyState
+              title="No rooms yet."
+              actionLabel="Create a room"
+              onAction={() => nav.navigate('CreateRoom')}
+            />
+          ) : activeTab === 'DMS' ? (
+            <EmptyState
+              title="No direct messages yet."
+              actionLabel="Message a connection"
+              onAction={() => setNewMessageOpen(true)}
+            />
+          ) : (
+            <EmptyState
+              title="No conversations found."
+              actionLabel="Find teammates to message"
+              onAction={() => nav.navigate('Network')}
+            />
+          )
+        ) : null}
+
+        {/* Conversations List */}
+        {!loading && !error
+          ? filtered.map((r) => <ChatroomRow key={r.id} room={r} onPress={() => open(r)} />)
+          : null}
+
+        {!loading && !error && filtered.length > 0 ? (
+          <LoadMoreButton hasMore={roomsHasMore} onPress={() => user && loadMoreRooms(user.id)} />
+        ) : null}
       </ScrollView>
 
-      <SearchBar value={q} onChangeText={setQ} placeholder="Search channels" />
-      <Text style={[styles.channelLabel, { color: colors.muted }]}>
-        {guild === 'reapers' ? '#  CHANNELS' : guild === 'dms' ? 'DIRECT MESSAGES' : 'SERVER CHAT'}
-      </Text>
-
-      {phase === 'loading' ? (
-        <View style={{ gap: 12 }}>
-          <Skeleton width="100%" height={72} />
-          <Skeleton width="100%" height={72} />
-        </View>
-      ) : null}
-
-      {phase === 'ready' && filtered.length === 0 ? (
-        <EmptyState title="Nothing in this server yet." actionLabel="Create a channel" onAction={() => nav.navigate('CreateRoom')} />
-      ) : null}
-
-      {phase === 'ready'
-        ? filtered.map((r) => <ChatroomRow key={r.id} room={r} onPress={() => open(r)} />)
-        : null}
+      {/* Confirmation Modals */}
+      <GuidelinesSheet
+        visible={!!guidelinesTargetId}
+        onAccept={() => {
+          if (guidelinesTargetId) {
+            markGuidelinesSeen(guidelinesTargetId);
+            setPendingId(guidelinesTargetId);
+          }
+          setGuidelinesTargetId(null);
+        }}
+        onClose={() => setGuidelinesTargetId(null)}
+      />
 
       <ConfirmSheet
         visible={!!pending}
-        title={`Join ${pending?.name ?? ''}`}
-        body={pending?.description ?? ''}
-        confirmLabel="Join"
+        title={pending?.requiresApproval ? `Request to join ${pending?.name ?? ''}` : `Join ${pending?.name ?? ''}`}
+        body={
+          pending?.requiresApproval
+            ? "This room's admin approves join requests — you'll be notified once they respond."
+            : pending?.description ?? ''
+        }
+        confirmLabel={pending?.requiresApproval ? 'Send request' : 'Join'}
+        danger={false}
         onClose={() => setPendingId(null)}
-        onConfirm={() => {
-          if (pending) {
-            joinRoom(pending.id);
-            setPendingId(null);
-            nav.navigate('ChatDetail', { id: pending.id });
+        onConfirm={async () => {
+          if (!pending || !user) return;
+          setJoinErr('');
+          try {
+            if (pending.requiresApproval) {
+              await requestToJoinRoom(pending.id, user.id);
+              setPendingId(null);
+              setRequestSent(true);
+            } else {
+              await joinRoom(user.id, pending.id);
+              setPendingId(null);
+              nav.navigate('ChatDetail', { id: pending.id });
+            }
+          } catch (e) {
+            setJoinErr(e instanceof Error ? e.message : 'Could not join room');
           }
         }}
       />
-    </Screen>
+
+      {joinErr ? <InlineErrorText message={joinErr} /> : null}
+
+      <ConfirmSheet
+        visible={requestSent}
+        title="Request sent"
+        body="The room's admin will review your request. You'll get a notification once they respond."
+        confirmLabel="OK"
+        danger={false}
+        onClose={() => setRequestSent(false)}
+        onConfirm={() => setRequestSent(false)}
+      />
+
+      {/* New Message — searchable, paginated list of every accepted connection (not just
+          people you already have a thread with); a real server-side query + FlatList
+          virtualization, so this stays fast and correct whether someone has 5 connections or
+          5,000, tapping one starts/opens the DM. */}
+      <Modal visible={newMessageOpen} animationType="slide" transparent onRequestClose={() => setNewMessageOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>New Message</Text>
+              <Pressable onPress={() => setNewMessageOpen(false)} accessibilityRole="button" hitSlop={8}>
+                <Ionicons name="close" size={22} color={colors.muted} />
+              </Pressable>
+            </View>
+
+            <CyberCutBox cutSize={8} radius={5} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={0.88} style={styles.dmSearchCutBox}>
+              <View style={styles.searchInputRow}>
+                <Ionicons name="search-outline" size={16} color={colors.muted2} />
+                <TextInput
+                  value={dmSearch}
+                  onChangeText={setDmSearch}
+                  placeholder="Search connections"
+                  placeholderTextColor={colors.muted2}
+                  style={[styles.searchInput, { color: colors.text }]}
+                />
+              </View>
+            </CyberCutBox>
+
+            <FlatList
+              data={connections}
+              keyExtractor={(p) => p.id}
+              style={{ maxHeight: 420 }}
+              keyboardShouldPersistTaps="handled"
+              onEndReachedThreshold={0.4}
+              onEndReached={() => {
+                if (connectionsHasMore) loadMoreConnections();
+              }}
+              ListEmptyComponent={
+                connectionsLoading ? null : (
+                  <EmptyState
+                    title={dmSearchDq ? 'No connections match that search.' : 'No connections yet.'}
+                    actionLabel="Find teammates"
+                    onAction={() => {
+                      setNewMessageOpen(false);
+                      nav.navigate('Network');
+                    }}
+                  />
+                )
+              }
+              ListFooterComponent={connectionsLoading ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 12 }} /> : null}
+              renderItem={({ item: p }) => (
+                <Pressable
+                  onPress={() => openDm(p.id, p.displayName)}
+                  disabled={!!startingDmId}
+                  style={styles.connectionRow}
+                  accessibilityRole="button"
+                >
+                  <Image source={getCyberAvatarSource(p.id)} style={styles.connectionAvatar} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.connectionName, { color: colors.text }]} numberOfLines={1}>
+                      {p.displayName}
+                    </Text>
+                    <Text style={[styles.connectionRole, { color: colors.muted }]} numberOfLines={1}>
+                      {p.roles.join(' · ') || 'Member'}
+                    </Text>
+                  </View>
+                  {startingDmId === p.id ? <Text style={{ color: colors.muted, fontSize: 12 }}>Opening…</Text> : null}
+                </Pressable>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  h: { fontFamily: fonts.display, fontSize: 28 },
-  fab: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  guilds: { gap: 12, paddingVertical: 12, paddingRight: 8 },
-  guild: { width: 64, alignItems: 'center', gap: 6 },
-  guildIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.md,
-    borderWidth: 2,
+  container: {
+    flex: 1,
+    backgroundColor: '#090F1C',
+  },
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  headerBtn: {
+    width: 36,
+    height: 36,
+  },
+  headerCutBox: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitleCol: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  headerTitle: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  headerSub: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    letterSpacing: 0.8,
+    color: '#8E9BB5',
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  searchCutBox: {
+    width: '100%',
+    height: 46,
+    marginBottom: 14,
+  },
+  searchInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    height: '100%',
+    gap: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  filterTabsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  tabBtn: {
+    height: 36,
+    minWidth: 80,
+  },
+  tabCutBox: {
+    height: 36,
+    width: '100%',
+  },
+  tabInner: {
+    width: '100%',
+    height: '100%',
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    color: '#8E9BB5',
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  createRoomBtn: {
+    height: 42,
+    marginBottom: 16,
+  },
+  createRoomCut: {
+    width: '100%',
+    height: '100%',
+  },
+  createRoomInner: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+    gap: 6,
   },
-  guildImg: { width: '100%', height: '100%' },
-  channelLabel: { fontFamily: fonts.mono, fontSize: 11, letterSpacing: 1, marginTop: 14, marginBottom: 8 },
+  createRoomText: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  modalSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  dmSearchCutBox: {
+    height: 42,
+    marginBottom: 12,
+  },
+  connectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  connectionAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  connectionName: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 14.5,
+    fontWeight: '700',
+  },
+  connectionRole: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    marginTop: 2,
+  },
 });

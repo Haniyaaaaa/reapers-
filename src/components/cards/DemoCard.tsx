@@ -1,4 +1,5 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { DemoThumb } from '../media/DemoThumb';
 import type { Demo } from '../../types/demo';
 import { fonts, radius, useTheme } from '../../theme';
 import { formatDuration } from '../../utils/format';
@@ -10,7 +11,7 @@ export function DemoCard({ demo, onPress }: { demo: Demo; onPress?: () => void }
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={demo.title}>
       <BladeCard style={styles.card}>
-        <Image source={{ uri: demo.thumbnail }} style={styles.image} accessibilityLabel={`${demo.title} thumbnail`} />
+        <DemoThumb uri={demo.thumbnail} style={styles.image} accessibilityLabel={`${demo.title} thumbnail`} />
         <View style={[styles.tag, { backgroundColor: colors.overlay }]}>
           <Text style={[styles.tagText, { color: colors.text }]}>{formatDuration(demo.durationSec)}</Text>
         </View>

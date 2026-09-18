@@ -1,0 +1,29 @@
+allowBuilds:
+  '@sentry/cli': true
+overrides:
+  # @expo/metro pins an exact metro@0.84.5, but react-native's own
+  # @react-native/community-cli-plugin depends on metro@^0.84.3 — pnpm was resolving two
+  # separate copies (0.84.5 and 0.84.6) side by side, and Metro's Bundler assumed a single
+  # transformer instance, crashing with "Cannot read properties of undefined (reading
+  # 'transformFile')" because the two copies' internal state didn't line up. Forcing one
+  # version (matching Expo's exact pin, which RN's looser range also satisfies) fixes it.
+  metro: 0.84.5
+  metro-config: 0.84.5
+  metro-core: 0.84.5
+  metro-resolver: 0.84.5
+  metro-runtime: 0.84.5
+  metro-source-map: 0.84.5
+  metro-transform-worker: 0.84.5
+  metro-transform-plugins: 0.84.5
+  metro-babel-transformer: 0.84.5
+  metro-cache: 0.84.5
+  metro-cache-key: 0.84.5
+  metro-file-map: 0.84.5
+  metro-minify-terser: 0.84.5
+  metro-symbolicate: 0.84.5
+minimumReleaseAgeExclude:
+  - expo-sharing@57.0.21
+  - expo-constants@57.0.19
+  - expo-notifications@57.0.20
+  - expo-location@57.0.19
+  - expo-build-properties@57.0.21

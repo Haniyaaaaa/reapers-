@@ -1,4 +1,5 @@
-export type Role = 'gamer' | 'developer';
+export type Role = 'gamer' | 'developer' | 'expert';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export type User = {
   id: string;
@@ -15,10 +16,19 @@ export type User = {
   portfolioUrl?: string;
   linkedinUrl?: string;
   location?: string;
+  yearsExperience?: number;
+  interests: string[];
   credibility: number;
   followers: number;
   following: number;
   posts: number;
+  isExpert?: boolean;
+  isAdmin: boolean;
   online?: boolean;
   avatarLook?: import('../data/gamerAvatars').AvatarLook;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  approvalStatus: ApprovalStatus;
+  approvalRejectionReason?: string;
 };

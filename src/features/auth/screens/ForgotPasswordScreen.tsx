@@ -3,67 +3,68 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import type { AuthStackParamList } from '../../../navigation/types';
-import { PrimaryButton } from '../../../components/buttons/PrimaryButton';
+import { CyberButton } from '../../../components/cyber/CyberButton';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
 import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
-import { colors, fonts } from '../../../theme';
+import { fonts, useTheme } from '../../../theme';
 import { isEmail } from '../../../utils/validation';
+import { useAuth } from '../../../hooks/useAuth';
 
 export function ForgotPasswordScreen() {
+  const { colors } = useTheme();
   const nav = useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
+  const { requestPasswordReset } = useAuth();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
-  const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!isEmail(email)) {
+    const e = email.trim();
+    if (!isEmail(e)) {
       setError('Enter a valid email');
       return;
     }
+    setError('');
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 500));
-    setLoading(false);
-    setSent(true);
+    try {
+      await requestPasswordReset(e);
+      nav.navigate('ResetPassword', { email: e });
+    } catch (err) {
+      // Deliberately vague — a precise "no account for that email" error would let an
+      // attacker enumerate registered addresses.
+      setError(err instanceof Error ? err.message : 'Could not send reset code');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <Screen footerPad={false}>
       <ScreenHeader title="Reset password" onBack={() => nav.goBack()} />
-      {sent ? (
-        <>
-          <Text style={styles.title}>Check your inbox</Text>
-          <Text style={styles.body}>
-            If an account exists for {email}, a reset link is on its way. It expires in 30 minutes.
-          </Text>
-          <PrimaryButton label="Back to login" onPress={() => nav.navigate('Login')} />
-        </>
-      ) : (
-        <>
-          <Text style={styles.body}>We’ll email you a reset link. No password is changed until you follow it.</Text>
-          <AuthTextField
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            error={error}
-            onBlur={() => setError(isEmail(email) ? '' : 'Enter a valid email')}
-          />
-          <PrimaryButton label="Send reset link" onPress={submit} loading={loading} />
-        </>
-      )}
+      <Text style={[styles.body, { color: colors.muted }]}>
+        We’ll email you a 6-digit code. No password is changed until you enter it and choose a new one.
+      </Text>
+      <AuthTextField
+        label="Email"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoComplete="email"
+        keyboardType="email-address"
+        error={error}
+        onBlur={() => setError(isEmail(email) ? '' : 'Enter a valid email')}
+      />
+      <CyberButton label="Send reset code" onPress={submit} loading={loading} disabled={loading} />
       <Pressable onPress={() => nav.navigate('Login')} style={styles.link} accessibilityRole="button">
-        <Text style={styles.linkText}>Return to login</Text>
+        <Text style={[styles.linkText, { color: colors.primary }]}>Return to login</Text>
       </Pressable>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { color: colors.text, fontFamily: fonts.display, fontSize: 24, marginBottom: 8 },
-  body: { color: colors.muted, fontFamily: fonts.body, marginBottom: 16 },
+  body: { fontFamily: fonts.body, marginBottom: 16 },
   link: { minHeight: 44, justifyContent: 'center' },
-  linkText: { color: colors.cyan, fontFamily: fonts.bodyMed, textAlign: 'center' },
+  linkText: { fontFamily: fonts.bodyMed, textAlign: 'center' },
 });

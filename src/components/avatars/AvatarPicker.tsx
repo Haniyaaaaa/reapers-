@@ -1,7 +1,10 @@
+import React from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { fonts, useTheme } from '../../theme';
-import { bgColors, gamerAvatars, hairColors, skinColors, avatarUriFor, type AvatarLook } from '../../data/gamerAvatars';
 import * as ImagePicker from 'expo-image-picker';
+import { CYBER_AVATARS } from '../../data/cyberAvatars';
+import { fonts, useTheme } from '../../theme';
+import { CyberCutBox } from '../cyber/CyberCutBox';
+import type { AvatarLook } from '../../data/gamerAvatars';
 
 export function AvatarPicker({
   selectedId,
@@ -15,26 +18,33 @@ export function AvatarPicker({
   customUri?: string;
   look?: AvatarLook;
   onSelectId: (id: string) => void;
-  onCustomUri: (uri: string) => void;
+  onCustomUri: (uri: string | undefined) => void;
   onLookChange?: (look: AvatarLook) => void;
 }) {
-  const { colors } = useTheme();
-
+  const { colors, isLight } = useTheme();
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
     if (!res.canceled && res.assets[0]?.uri) onCustomUri(res.assets[0].uri);
   };
 
-  const chip = (active: boolean) => ({
-    borderColor: active ? colors.magenta : colors.border,
-    backgroundColor: active ? colors.magentaDeep : colors.surface,
-  });
-
   return (
-    <View style={{ gap: 10 }}>
+    <View style={styles.container}>
+      {customUri ? (
+        <View style={styles.previewRow}>
+          <Image source={{ uri: customUri }} style={styles.previewImg} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Photo Selected</Text>
+            <Pressable onPress={() => onCustomUri(undefined)} accessibilityRole="button">
+              <Text style={[styles.removeText, { color: colors.primary }]}>Remove photo</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Cyber Avatars Grid */}
       <View style={styles.grid}>
-        {gamerAvatars.map((a) => {
-          const on = selectedId === a.id && !customUri;
+        {CYBER_AVATARS.map((a) => {
+          const on = (selectedId === a.id || (!selectedId && a.id === 'male_1')) && !customUri;
           return (
             <Pressable
               key={a.id}
@@ -44,10 +54,28 @@ export function AvatarPicker({
               accessibilityState={{ selected: on }}
               accessibilityLabel={a.name}
             >
-              <View style={[styles.ring, { borderColor: on ? colors.magenta : colors.border }]}>
-                <Image source={{ uri: avatarUriFor(a.id, a.name, on ? look : undefined) }} style={styles.img} />
+              <View
+                style={[
+                  styles.avatarRing,
+                  {
+                    borderColor: on ? '#D83CFF' : colors.cardBorder,
+                    backgroundColor: on
+                      ? (isLight ? 'rgba(216, 60, 255, 0.12)' : 'rgba(216, 60, 255, 0.2)')
+                      : (isLight ? colors.cardFill : '#161B2E'),
+                  },
+                  on && styles.avatarRingActive,
+                ]}
+              >
+                <Image source={a.source} style={styles.avatarImg} />
               </View>
-              <Text style={[styles.name, { color: on ? colors.magenta : colors.text }]} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.avatarName,
+                  { color: on ? '#D83CFF' : colors.muted },
+                  on && styles.avatarNameActive,
+                ]}
+                numberOfLines={1}
+              >
                 {a.name}
               </Text>
             </Pressable>
@@ -55,61 +83,107 @@ export function AvatarPicker({
         })}
       </View>
 
-      {onLookChange && !customUri ? (
-        <View style={{ gap: 8 }}>
-          <Text style={[styles.section, { color: colors.muted }]}>Customize character</Text>
-          <Text style={[styles.hint, { color: colors.muted2 }]}>Hair</Text>
-          <View style={styles.row}>
-            {hairColors.map((c) => (
-              <Pressable key={c.id} onPress={() => onLookChange({ ...look, hairColor: c.id })} style={[styles.swatch, chip(look?.hairColor === c.id)]}>
-                <Text style={[styles.swatchText, { color: colors.text }]}>{c.label}</Text>
-              </Pressable>
-            ))}
+      {/* Custom Photo Button */}
+      <Pressable onPress={pick} style={styles.uploadBtnTouch} accessibilityRole="button">
+        <CyberCutBox
+          cutSize={8}
+          radius={6}
+          fill={isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.85)'}
+          borderColor={isLight ? colors.cardBorder : 'rgba(0, 229, 255, 0.4)'}
+          borderWidth={0.88}
+          style={styles.uploadCutBox}
+        >
+          <View style={styles.uploadInner}>
+            <Text style={[styles.uploadText, { color: colors.primary }]}>Upload Custom Photo</Text>
           </View>
-          <Text style={[styles.hint, { color: colors.muted2 }]}>Skin</Text>
-          <View style={styles.row}>
-            {skinColors.map((c) => (
-              <Pressable key={c.id} onPress={() => onLookChange({ ...look, skinColor: c.id })} style={[styles.swatch, chip(look?.skinColor === c.id)]}>
-                <Text style={[styles.swatchText, { color: colors.text }]}>{c.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <Text style={[styles.hint, { color: colors.muted2 }]}>Background</Text>
-          <View style={styles.row}>
-            {bgColors.map((c) => (
-              <Pressable key={c.id} onPress={() => onLookChange({ ...look, backgroundColor: c.id })} style={[styles.swatch, chip(look?.backgroundColor === c.id)]}>
-                <Text style={[styles.swatchText, { color: colors.text }]}>{c.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      ) : null}
-
-      <Pressable onPress={pick} style={[styles.upload, { borderColor: colors.cyan }]} accessibilityRole="button">
-        <Text style={{ color: colors.cyan, fontFamily: fonts.bodySemi }}>Upload your photo</Text>
+        </CyberCutBox>
       </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  cell: { width: '25%', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 2 },
-  ring: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 2,
+  container: {
+    gap: 12,
+    marginVertical: 4,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  previewImg: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 1.5,
+    borderColor: '#00E5FF',
+  },
+  sectionTitle: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 14,
+  },
+  removeText: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -4,
+  },
+  cell: {
+    width: '25%',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  avatarRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  img: { width: 48, height: 48, borderRadius: 24 },
-  name: { fontFamily: fonts.bodyMed, fontSize: 10, textAlign: 'center' },
-  section: { fontFamily: fonts.bodySemi, fontSize: 13 },
-  hint: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.4 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  swatch: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
-  swatchText: { fontFamily: fonts.body, fontSize: 12 },
-  upload: { minHeight: 44, borderWidth: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  avatarRingActive: {
+    borderWidth: 2,
+  },
+  avatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarName: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  avatarNameActive: {
+    fontFamily: fonts.bodySemi,
+    fontWeight: '700',
+  },
+  uploadBtnTouch: {
+    width: '100%',
+    height: 44,
+    marginTop: 6,
+  },
+  uploadCutBox: {
+    width: '100%',
+    height: '100%',
+  },
+  uploadInner: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  uploadText: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 13.5,
+  },
 });
+

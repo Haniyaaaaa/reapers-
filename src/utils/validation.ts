@@ -4,6 +4,12 @@ export function isEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+// Collected but not SMS-verified (see the Onboarding & Admin Panel addendum) — a loose
+// format check is enough since there's no verification step to gate on it.
+export function isPhone(value: string) {
+  return /^[+]?[\d\s()-]{7,20}$/.test(value.trim());
+}
+
 export function passwordStrength(value: string) {
   if (value.length < 8) return { ok: false, message: 'At least 8 characters' };
   if (!/[A-Z]/.test(value)) return { ok: false, message: 'Add an uppercase letter' };

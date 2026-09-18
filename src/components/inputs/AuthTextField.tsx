@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { fonts, radius, useTheme } from '../../theme';
 import { InlineErrorText } from '../feedback/InlineErrorText';
 
@@ -10,8 +11,9 @@ type Props = TextInputProps & {
   showCount?: boolean;
 };
 
-export function AuthTextField({ label, error, hint, showCount, onBlur, style, ...rest }: Props) {
+export function AuthTextField({ label, error, hint, showCount, onBlur, style, secureTextEntry, ...rest }: Props) {
   const [focused, setFocused] = useState(false);
+  const [hidden, setHidden] = useState(true);
   const { colors } = useTheme();
   const multiline = !!rest.multiline;
   const count = typeof rest.value === 'string' ? rest.value.length : 0;
@@ -37,6 +39,7 @@ export function AuthTextField({ label, error, hint, showCount, onBlur, style, ..
         <TextInput
           placeholderTextColor={colors.muted2}
           {...rest}
+          secureTextEntry={secureTextEntry && hidden}
           style={[styles.input, multiline && styles.inputMultiline, { color: colors.text }, style]}
           textAlignVertical={multiline ? 'top' : 'center'}
           onFocus={() => setFocused(true)}
@@ -45,6 +48,17 @@ export function AuthTextField({ label, error, hint, showCount, onBlur, style, ..
             onBlur?.(e);
           }}
         />
+        {secureTextEntry ? (
+          <Pressable
+            onPress={() => setHidden((h) => !h)}
+            accessibilityRole="button"
+            accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
+            hitSlop={8}
+            style={styles.eyeBtn}
+          >
+            <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={colors.muted} />
+          </Pressable>
+        ) : null}
       </View>
       {error ? <InlineErrorText message={error} /> : null}
       {!error && hint ? <Text style={[styles.hint, { color: colors.muted2 }]}>{hint}</Text> : null}
@@ -67,6 +81,7 @@ const styles = StyleSheet.create({
   },
   fieldMultiline: { minHeight: 104, alignItems: 'flex-start', paddingVertical: 4 },
   input: { flex: 1, fontFamily: fonts.body, fontSize: 16, paddingVertical: 10 },
+  eyeBtn: { paddingLeft: 8, minHeight: 44, minWidth: 32, alignItems: 'center', justifyContent: 'center' },
   inputMultiline: { minHeight: 92, lineHeight: 22 },
   hint: { fontFamily: fonts.body, fontSize: 12 },
 });

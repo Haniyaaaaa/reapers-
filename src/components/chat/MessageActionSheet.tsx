@@ -1,5 +1,5 @@
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { EmojiPickerTray } from './EmojiPickerTray';
 import { quickReactions } from '../../data/emojiCatalog';
 import { fonts, radius, useTheme } from '../../theme';
@@ -46,8 +46,13 @@ export function MessageActionSheet({
     { key: 'info', label: 'Info', icon: 'information-circle-outline' },
     { key: 'star', label: message.starred ? 'Unstar' : 'Star', icon: message.starred ? 'star' : 'star-outline' },
     { key: 'pin', label: message.pinned ? 'Unpin' : 'Pin', icon: 'pin-outline' },
-    { key: 'edit', label: 'Edit', icon: 'create-outline', hide: !message.mine || message.deleted || message.kind === 'gif' },
-    { key: 'delete', label: 'Delete', icon: 'trash-outline', danger: true, hide: !message.mine || message.deleted },
+    {
+      key: 'edit',
+      label: 'Edit',
+      icon: 'create-outline',
+      hide: !message.mine || message.deleted || message.kind === 'gif' || message.kind === 'image' || message.kind === 'video',
+    },
+    { key: 'delete', label: 'Delete', icon: 'trash-outline', danger: true, hide: message.deleted },
   ];
 
   const run = (key: string) => {

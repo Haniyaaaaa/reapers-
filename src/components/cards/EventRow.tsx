@@ -12,7 +12,7 @@ export function EventRow({
 }) {
   const { colors } = useTheme();
   const { day, month } = formatDateBlock(event.startsAt);
-  const price = event.paid && event.price ? `${event.currency === 'USD' ? '$' : ''}${event.price}` : 'Free';
+  const price = event.paid && event.price ? `Rs ${event.price}` : 'Free';
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={event.title} style={[styles.row, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={[styles.date, { backgroundColor: colors.plumDeep }]}>

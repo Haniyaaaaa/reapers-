@@ -8,6 +8,7 @@ export type Expert = {
   verified: boolean;
   specialties: string[];
   rating: number;
+  reviewCount: number;
   nextSlot: string;
   bio: string;
   location?: string;

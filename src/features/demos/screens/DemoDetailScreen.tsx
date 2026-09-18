@@ -1,158 +1,1500 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
-import { Image, KeyboardAvoidingView, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { InlineVideoPlayer } from '../../../components/media/InlineVideoPlayer';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import {
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import type { MainStackParamList } from '../../../navigation/types';
+import { CyberBackground } from '../../../components/cyber/CyberBackground';
+import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { InlineVideoPlayer } from '../../../components/media/InlineVideoPlayer';
+import { DemoThumb } from '../../../components/media/DemoThumb';
 import { AvatarRing } from '../../../components/avatars/AvatarRing';
+import { AuthTextField } from '../../../components/inputs/AuthTextField';
+import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { EmptyState } from '../../../components/feedback/EmptyState';
-import { Screen } from '../../../components/layout/Screen';
-import { ScreenHeader } from '../../../components/layout/ScreenHeader';
+import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
+import { CyberButton } from '../../../components/cyber/CyberButton';
+import { RubricInput } from '../../../components/inputs/RubricInput';
+import { getCyberAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
-import { useCommunityStore } from '../../../store/communityStore';
-import { fonts, radius, useTheme } from '../../../theme';
-import { formatTime } from '../../../utils/format';
-import { Ionicons } from '@expo/vector-icons';
+import { useDemoStore } from '../../../store/demoStore';
+import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import { createVideoPlayer } from 'expo-video';
+import { deleteObjectByPublicUrl, uploadDemoScreenshot, uploadDemoThumbnail, uploadDemoVideo } from '../../../services/supabase/storage';
+import { fonts, useTheme } from '../../../theme';
+import { formatCount, formatDuration, formatTime } from '../../../utils/format';
+import { EMPTY_ARRAY } from '../../../utils/emptyArray';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export function DemoDetailScreen() {
   const route = useRoute<RouteProp<MainStackParamList, 'DemoDetail'>>();
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const id = route.params?.id;
-  const demo = useCommunityStore((s) => s.demos.find((d) => d.id === id));
-  const allComments = useCommunityStore((s) => s.comments);
-  const addComment = useCommunityStore((s) => s.addComment);
+
+  const demo = useDemoStore((s) => s.demos.find((d) => d.id === id));
+  const comments = useDemoStore((s) => (id ? s.comments[id] ?? EMPTY_ARRAY : EMPTY_ARRAY));
+  const commentsLoading = useDemoStore((s) => (id ? s.commentsLoading[id] ?? false : false));
+  const myReview = useDemoStore((s) => (id ? s.myReviews[id] : undefined));
+  const reviews = useDemoStore((s) => (id ? s.reviews[id] ?? EMPTY_ARRAY : EMPTY_ARRAY));
+  const bookmarked = useDemoStore((s) => (id ? s.bookmarkedIds.has(id) : false));
+  const fetchComments = useDemoStore((s) => s.fetchComments);
+  const addCommentAction = useDemoStore((s) => s.addComment);
+  const fetchMyReview = useDemoStore((s) => s.fetchMyReview);
+  const submitReviewAction = useDemoStore((s) => s.submitReview);
+  const fetchDemos = useDemoStore((s) => s.fetchDemos);
+  const demosLoaded = useDemoStore((s) => s.demos.length > 0 || s.loading);
+  const updateDemoAction = useDemoStore((s) => s.updateDemo);
+  const deleteDemoAction = useDemoStore((s) => s.deleteDemo);
+  const deleteReviewAction = useDemoStore((s) => s.deleteReview);
+  const deleteCommentAction = useDemoStore((s) => s.deleteComment);
+  const fetchReviews = useDemoStore((s) => s.fetchReviews);
+  const voteOnReviewAction = useDemoStore((s) => s.voteOnReview);
+  const ensureBookmarksLoaded = useDemoStore((s) => s.ensureBookmarksLoaded);
+  const toggleBookmarkAction = useDemoStore((s) => s.toggleBookmark);
+  const incrementPlayCount = useDemoStore((s) => s.incrementPlayCount);
+
+  useEffect(() => {
+    if (!demosLoaded) fetchDemos();
+  }, [demosLoaded, fetchDemos]);
+
   const [playing, setPlaying] = useState(false);
   const [text, setText] = useState('');
-  const [liked, setLiked] = useState(false);
+  const [commentErr, setCommentErr] = useState('');
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [editScreenshots, setEditScreenshots] = useState<string[]>([]);
+  const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
+  const hasCountedPlay = useRef(false);
 
-  const sorted = useMemo(
-    () =>
-      allComments
-        .filter((c) => c.demoId === id)
-        .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
-    [allComments, id],
-  );
+  const [rubric, setRubric] = useState({ gameplay: 0, art: 0, concept: 0, polish: 0 });
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewSaved, setReviewSaved] = useState(false);
+
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editExternalUrl, setEditExternalUrl] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleteReviewConfirm, setDeleteReviewConfirm] = useState(false);
+  const [deletingReview, setDeletingReview] = useState(false);
+  const [deleteCommentId, setDeleteCommentId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    fetchComments(id);
+    fetchReviews(id, user?.id);
+    if (user) {
+      fetchMyReview(id, user.id);
+      ensureBookmarksLoaded(user.id);
+    }
+  }, [id, user, fetchComments, fetchMyReview, fetchReviews, ensureBookmarksLoaded]);
+
+  useEffect(() => {
+    if (myReview) {
+      setRubric({
+        gameplay: myReview.score_gameplay,
+        art: myReview.score_art,
+        concept: myReview.score_concept,
+        polish: myReview.score_polish,
+      });
+      setReviewComment(myReview.comment);
+    }
+  }, [myReview]);
+
+  const sorted = useMemo(() => comments, [comments]);
+
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoErr, setVideoErr] = useState('');
 
   if (!id || !demo) {
     return (
-      <Screen>
-        <ScreenHeader title="Demo" onBack={() => nav.goBack()} />
-        <EmptyState title="This demo could not be opened. Go back and try again." actionLabel="Back" onAction={() => nav.goBack()} />
-      </Screen>
+      <View style={[styles.container, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+        <CyberBackground showArtwork={false} />
+        <View style={styles.topBackHeader}>
+          <Pressable onPress={() => nav.goBack()} style={[styles.iconCircleBtn, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]} accessibilityRole="button">
+            <Ionicons name="chevron-back" size={22} color={colors.text} />
+          </Pressable>
+        </View>
+        <EmptyState
+          title="This demo could not be opened."
+          actionLabel="Go Back"
+          onAction={() => nav.goBack()}
+        />
+      </View>
     );
   }
 
-  const post = () => {
+  const isOwnDemo = user?.id === demo.developerId;
+  const rubricComplete = rubric.gameplay > 0 && rubric.art > 0 && rubric.concept > 0 && rubric.polish > 0;
+
+  // Average score calculation
+  const scores = demo.scores;
+  const avgRating = scores
+    ? (scores.gameplay + scores.art + scores.concept + scores.polish) / 4
+    : 0;
+  const hasReviews = demo.reviewCount > 0;
+  const ratingDisplay = avgRating.toFixed(1);
+  const starsCount = Math.min(5, Math.max(0, Math.round(avgRating)));
+  const sliceBadge = demo.isJamEntry ? 'JAM ENTRY' : 'VERTICAL SLICE';
+
+  const postComment = async () => {
     const body = text.trim();
-    if (!body) return;
-    addComment(demo.id, user?.displayName ?? 'You', body, user?.avatarId);
+    if (!body || !user) return;
     setText('');
+    setCommentErr('');
+    try {
+      await addCommentAction(demo.id, user.id, body);
+    } catch (err) {
+      setText(body);
+      setCommentErr(err instanceof Error ? err.message : 'Could not post comment — try again.');
+    }
+  };
+
+  const startEditing = () => {
+    setEditTitle(demo.title);
+    setEditDescription(demo.description);
+    setEditExternalUrl(demo.externalUrl ?? '');
+    setEditScreenshots(demo.screenshotUrls ?? []);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (editTitle.trim().length < 3) return;
+    setEditSaving(true);
+    try {
+      await updateDemoAction(demo.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+        externalUrl: editExternalUrl.trim() || null,
+        screenshotUrls: editScreenshots,
+      });
+      setEditing(false);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const addScreenshot = async () => {
+    if (!user || editScreenshots.length >= 5) return;
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (res.canceled || !res.assets[0]) return;
+    setUploadingScreenshot(true);
+    try {
+      const url = await uploadDemoScreenshot(user.id, demo.id, res.assets[0].uri, editScreenshots.length);
+      setEditScreenshots((s) => [...s, url]);
+    } catch {
+      // Best-effort — a failed screenshot upload just means nothing is added.
+    } finally {
+      setUploadingScreenshot(false);
+    }
+  };
+
+  // Adds or replaces the demo's video after the fact — a demo published without one (build
+  // link only) previously had no way to ever get a video. Same 30s–2min limit as the upload
+  // screen (demos_duration_range), committed immediately rather than waiting on "Save".
+  const pickDemoVideo = async () => {
+    if (!user || videoBusy) return;
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
+    if (res.canceled || !res.assets[0]) return;
+    const asset = res.assets[0];
+    setVideoErr('');
+    setVideoBusy(true);
+    let newVideoUrl: string | undefined;
+    let newThumbUrl: string | undefined;
+    try {
+      // ImagePicker duration is in milliseconds; fall back to reading it from the file.
+      let sec = asset.duration != null ? asset.duration / 1000 : NaN;
+      if (!Number.isFinite(sec)) {
+        sec = await new Promise<number>((resolve, reject) => {
+          const player = createVideoPlayer(asset.uri);
+          const t = setTimeout(() => reject(new Error('Could not read this video.')), 8000);
+          const sub = player.addListener('sourceLoad', (p) => {
+            clearTimeout(t);
+            sub.remove();
+            resolve(p.duration);
+          });
+        });
+      }
+      sec = Math.round(sec);
+      if (sec < 30) throw new Error('Video is too short — must be at least 30s.');
+      if (sec > 120) throw new Error('Video is too long — must be 2 minutes or less.');
+
+      newVideoUrl = await uploadDemoVideo(user.id, `${demo.id}-${Date.now()}`, asset.uri);
+      if (!demo.thumbnail) {
+        try {
+          const { uri } = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 1000 });
+          newThumbUrl = await uploadDemoThumbnail(user.id, `${demo.id}-${Date.now()}`, uri);
+        } catch {
+          // no cover frame — keeps the placeholder
+        }
+      }
+      const oldVideo = demo.videoUrl;
+      await updateDemoAction(demo.id, {
+        videoUrl: newVideoUrl,
+        durationSec: sec,
+        ...(newThumbUrl ? { thumbnailUrl: newThumbUrl } : {}),
+      });
+      if (oldVideo) deleteObjectByPublicUrl('demo-videos', oldVideo).catch(() => undefined);
+    } catch (e) {
+      if (newVideoUrl) deleteObjectByPublicUrl('demo-videos', newVideoUrl).catch(() => undefined);
+      if (newThumbUrl) deleteObjectByPublicUrl('demo-thumbnails', newThumbUrl).catch(() => undefined);
+      setVideoErr(e instanceof Error ? e.message : 'Could not upload the video — try again.');
+    } finally {
+      setVideoBusy(false);
+    }
+  };
+
+  const removeScreenshot = (url: string) => {
+    setEditScreenshots((s) => s.filter((u) => u !== url));
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteDemoAction(demo.id);
+      setDeleteConfirm(false);
+      nav.goBack();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const submitReview = async () => {
+    if (!user || !rubricComplete) return;
+    setReviewSubmitting(true);
+    setReviewError('');
+    setReviewSaved(false);
+    try {
+      await submitReviewAction(demo.id, user.id, rubric, reviewComment.trim());
+      setReviewSaved(true);
+      setShowReviewForm(false);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Could not submit review');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${demo.title} on Reapers: ${demo.externalUrl || 'https://reapers.gg'}`,
+      });
+    } catch {
+      // Ignored
+    }
+  };
+
+  const countPlayOnce = () => {
+    if (hasCountedPlay.current) return;
+    hasCountedPlay.current = true;
+    incrementPlayCount(demo.id);
+  };
+
+  const startPlaying = () => {
+    countPlayOnce();
+    setPlaying(true);
+  };
+
+  const handlePlayAction = () => {
+    if (demo.externalUrl) {
+      countPlayOnce();
+      Linking.openURL(demo.externalUrl);
+    } else {
+      startPlaying();
+    }
   };
 
   return (
-    <Screen footerPad={false}>
-      <ScreenHeader title={demo.title} onBack={() => nav.goBack()} />
-      <Pressable onPress={() => setPlaying(true)} accessibilityRole="button" accessibilityLabel="Play demo">
-        {playing && demo.videoUrl ? (
-          <View style={[styles.player, { backgroundColor: colors.surface }]}>
-            <InlineVideoPlayer uri={demo.videoUrl} playing muted={false} height={220} />
-          </View>
-        ) : (
-          <View>
-            <Image source={{ uri: demo.thumbnail }} style={styles.player} accessibilityLabel={`${demo.title} thumbnail`} />
-            <View style={styles.playWrap} pointerEvents="none">
-              <Ionicons name="play-circle" size={56} color="#fff" />
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <CyberBackground showArtwork={false} />
+
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero Banner Area */}
+        <View style={styles.heroContainer}>
+          {playing && demo.videoUrl ? (
+            <View style={styles.videoPlayerWrap}>
+              <InlineVideoPlayer uri={demo.videoUrl} playing muted={false} height={280} />
+            </View>
+          ) : (
+            <View style={styles.heroImageWrap}>
+              <DemoThumb uri={demo.thumbnail} style={styles.heroImage} iconSize={56} />
+
+              {/* Scrim Overlay */}
+              <LinearGradient
+                colors={['rgba(9, 15, 28, 0.65)', 'rgba(9, 15, 28, 0.25)', isDark ? '#090F1C' : colors.background]}
+                locations={[0, 0.45, 1]}
+                style={StyleSheet.absoluteFill}
+              />
+
+              {/* Center Glowing Play Button — only when there is actually a video to play */}
+              {demo.videoUrl ? (
+              <Pressable
+                onPress={startPlaying}
+                style={styles.centerPlayBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Play trailer"
+              >
+                <LinearGradient
+                  colors={['#00F0FF', '#7928CA', '#D83CFF']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.centerPlayGradient}
+                >
+                  <Ionicons name="play" size={32} color="#FFFFFF" style={{ marginLeft: 4 }} />
+                </LinearGradient>
+              </Pressable>
+              ) : null}
+
+              {/* Badges on Hero Image */}
+              <View style={styles.heroBadgesRow}>
+                <View style={styles.sliceBadge}>
+                  <Text style={styles.sliceBadgeText}>{sliceBadge}</Text>
+                </View>
+              </View>
+
+              {/* Title at bottom of banner */}
+              <View style={styles.heroBottomTitle}>
+                <Text style={[styles.heroTitleText, !isDark && { color: colors.text }]}>{demo.title}</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Top Floating Navigation Row */}
+          <View style={[styles.topActionRow, { paddingTop: insets.top + 8 }]}>
+            <Pressable
+              onPress={() => nav.goBack()}
+              style={[styles.iconCircleBtn, { backgroundColor: isDark ? 'rgba(14, 20, 35, 0.75)' : colors.cardFill, borderColor: colors.cardBorder }]}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Ionicons name="chevron-back" size={22} color={colors.text} />
+            </Pressable>
+
+            <View style={styles.topRightActions}>
+              {isOwnDemo ? (
+                <>
+                  <Pressable
+                    onPress={startEditing}
+                    style={[styles.iconCircleBtn, { backgroundColor: isDark ? 'rgba(14, 20, 35, 0.75)' : colors.cardFill, borderColor: colors.cardBorder }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit demo"
+                  >
+                    <Ionicons name="create-outline" size={20} color={colors.primary} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setDeleteConfirm(true)}
+                    style={[styles.iconCircleBtn, { backgroundColor: isDark ? 'rgba(14, 20, 35, 0.75)' : colors.cardFill, borderColor: colors.cardBorder }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete demo"
+                  >
+                    <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+                  </Pressable>
+                </>
+              ) : null}
+
+              <Pressable
+                onPress={() => user && toggleBookmarkAction(demo.id, user.id)}
+                style={[styles.iconCircleBtn, { backgroundColor: isDark ? 'rgba(14, 20, 35, 0.75)' : colors.cardFill, borderColor: colors.cardBorder }]}
+                accessibilityRole="button"
+                accessibilityLabel="Bookmark demo"
+              >
+                <Ionicons
+                  name={bookmarked ? 'bookmark' : 'bookmark-outline'}
+                  size={20}
+                  color={bookmarked ? '#D83CFF' : colors.text}
+                />
+              </Pressable>
+
+              <Pressable
+                onPress={handleShare}
+                style={[styles.iconCircleBtn, { backgroundColor: isDark ? 'rgba(14, 20, 35, 0.75)' : colors.cardFill, borderColor: colors.cardBorder }]}
+                accessibilityRole="button"
+                accessibilityLabel="Share demo"
+              >
+                <Ionicons name="share-outline" size={20} color={colors.text} />
+              </Pressable>
             </View>
           </View>
-        )}
-      </Pressable>
-      <View style={styles.actions}>
-        <Pressable onPress={() => setLiked((v) => !v)} style={styles.iconBtn} accessibilityRole="button">
-          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={26} color={liked ? colors.magenta : colors.text} />
-        </Pressable>
-        <Pressable style={styles.iconBtn} accessibilityRole="button">
-          <Ionicons name="chatbubble-outline" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ color: colors.muted, fontFamily: fonts.bodyMed }}>{sorted.length} comments</Text>
-      </View>
-      <Text style={[styles.h, { color: colors.text }]}>{demo.title}</Text>
-      <Text style={{ color: colors.muted, fontFamily: fonts.body, marginTop: 4 }}>
-        {demo.developerName} · {demo.genre}
-      </Text>
-      <Text style={{ color: colors.text, fontFamily: fonts.body, marginTop: 10, lineHeight: 22 }}>{demo.description}</Text>
-      {demo.externalUrl ? (
-        <Pressable onPress={() => Linking.openURL(demo.externalUrl!)} style={styles.linkRow} accessibilityRole="link">
-          <Ionicons name="link-outline" size={18} color={colors.cyan} />
-          <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed }} numberOfLines={1}>
-            {demo.externalUrl}
-          </Text>
-        </Pressable>
-      ) : null}
+        </View>
 
-      <Text style={[styles.h2, { color: colors.text }]}>Comments</Text>
-      {sorted.length === 0 ? <EmptyState title="No comments yet — say how the demo felt." /> : null}
-      {sorted.map((c) => (
-        <View key={c.id} style={styles.comment}>
-          <AvatarRing name={c.userName} size={36} avatarId={c.avatarId} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.text, fontFamily: fonts.bodySemi }}>
-              {c.userName}{' '}
-              <Text style={{ color: colors.muted2, fontFamily: fonts.body, fontSize: 12 }}>{formatTime(c.createdAt)}</Text>
-            </Text>
-            <Text style={{ color: colors.text, fontFamily: fonts.body, marginTop: 2, lineHeight: 20 }}>{c.text}</Text>
+        {/* Content Container */}
+        <View style={styles.contentWrap}>
+          {/* Owner Edit Form */}
+          {editing ? (
+            <View style={styles.editCard}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Edit Demo Details</Text>
+              <AuthTextField label="Title" value={editTitle} onChangeText={setEditTitle} maxLength={60} />
+              <AuthTextField
+                label="Description"
+                value={editDescription}
+                onChangeText={setEditDescription}
+                multiline
+                maxLength={240}
+              />
+              <AuthTextField
+                label="External Link"
+                value={editExternalUrl}
+                onChangeText={setEditExternalUrl}
+                autoCapitalize="none"
+              />
+
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Demo video</Text>
+              <Pressable onPress={pickDemoVideo} disabled={videoBusy} style={styles.videoBtnTouch} accessibilityRole="button">
+                <CyberCutBox cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.cancelCut}>
+                  <Text style={[styles.cancelBtnText, { color: colors.primary }]}>
+                    {videoBusy ? 'Uploading video…' : demo.videoUrl ? 'Replace video (30s–2min)' : 'Add video (30s–2min)'}
+                  </Text>
+                </CyberCutBox>
+              </Pressable>
+              {videoErr ? <InlineErrorText message={videoErr} /> : null}
+
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Screenshots</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
+                {editScreenshots.map((url) => (
+                  <View key={url} style={styles.editScreenshotWrap}>
+                    <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
+                    <Pressable onPress={() => removeScreenshot(url)} style={styles.removeScreenshotBtn} accessibilityRole="button">
+                      <Ionicons name="close" size={14} color="#FFFFFF" />
+                    </Pressable>
+                  </View>
+                ))}
+                {editScreenshots.length < 5 ? (
+                  <Pressable onPress={addScreenshot} style={styles.addScreenshotBtn} accessibilityRole="button" disabled={uploadingScreenshot}>
+                    <Ionicons name={uploadingScreenshot ? 'hourglass-outline' : 'add'} size={22} color={colors.primary} />
+                  </Pressable>
+                ) : null}
+              </ScrollView>
+
+              <View style={styles.editBtnRow}>
+                <CyberButton
+                  label="Save"
+                  onPress={saveEdit}
+                  loading={editSaving}
+                  disabled={editSaving || editTitle.trim().length < 3}
+                  style={{ flex: 1 }}
+                />
+                <Pressable onPress={() => setEditing(false)} style={styles.cancelCutTouch} accessibilityRole="button">
+                  <CyberCutBox cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.cancelCut}>
+                    <Text style={[styles.cancelBtnText, { color: colors.muted }]}>Cancel</Text>
+                  </CyberCutBox>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
+          {/* Developer Identity Card */}
+          <CyberCutBox
+            cutSize={12}
+            radius={6}
+            fill={colors.cardFill}
+            borderColor={colors.cardBorder}
+            borderWidth={1}
+            style={styles.developerCard}
+          >
+            <View style={styles.developerCardInner}>
+              <View style={[styles.devAvatarWrap, { borderColor: colors.primary }]}>
+                <Image
+                  source={getCyberAvatarSource(demo.developerAvatar)}
+                  style={styles.devAvatarImg}
+                />
+              </View>
+
+              <View style={styles.devInfoWrap}>
+                <Text style={[styles.devTag, { color: colors.primary }]}>DEVELOPER</Text>
+                <Text style={[styles.devName, { color: colors.text }]} numberOfLines={1}>
+                  {demo.developerName || 'Independent Studio'}
+                </Text>
+                {demo.externalUrl ? (
+                  <View style={styles.devLinksRow}>
+                    <Pressable onPress={() => Linking.openURL(demo.externalUrl!)}>
+                      <Text style={[styles.devLinkText, { color: colors.muted2 }]}>{demo.externalUrl.replace(/^https?:\/\//, '').split('/')[0]}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </View>
+
+              <Pressable
+                onPress={() => useProfilePreviewStore.getState().open(demo.developerId)}
+                style={styles.profileBtnTouch}
+                accessibilityRole="button"
+              >
+                <CyberCutBox
+                  cutSize={8}
+                  radius={4}
+                  fill="transparent"
+                  borderColor={colors.cardBorder}
+                  borderWidth={1}
+                  style={styles.profileCutBox}
+                >
+                  <LinearGradient
+                    colors={isDark ? ['rgba(0, 240, 255, 0.2)', 'rgba(216, 60, 255, 0.3)'] : ['rgba(14, 165, 233, 0.15)', 'rgba(216, 60, 255, 0.15)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.profileBtnGradient}
+                  >
+                    <Text style={[styles.profileBtnText, { color: colors.primary }]}>Profile</Text>
+                  </LinearGradient>
+                </CyberCutBox>
+              </Pressable>
+            </View>
+          </CyberCutBox>
+
+          {/* Rating Stars & Stats Row */}
+          <View style={styles.ratingStatsRow}>
+            {hasReviews ? (
+              <>
+                <Text style={styles.starsText}>{'★'.repeat(starsCount)}</Text>
+                <Text style={[styles.ratingScore, { color: colors.text }]}>{ratingDisplay}</Text>
+                <Text style={[styles.statDot, { color: colors.muted2 }]}>·</Text>
+                <Text style={[styles.statReviews, { color: colors.muted }]}>{demo.reviewCount} REVIEWS</Text>
+              </>
+            ) : (
+              <Text style={[styles.statReviews, { color: colors.muted }]}>No reviews yet</Text>
+            )}
+            <Text style={[styles.statDot, { color: colors.muted2 }]}>·</Text>
+            <Text style={[styles.statPlays, { color: colors.muted }]}>{formatCount(demo.playCount ?? 0)} PLAYS</Text>
           </View>
-        </View>
-      ))}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.composer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <AvatarRing name={user?.displayName ?? 'You'} size={32} uri={user?.avatarUri} avatarId={user?.avatarId} />
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="How did this demo feel?"
-            placeholderTextColor={colors.muted2}
-            style={[styles.input, { color: colors.text }]}
-          />
-          <Pressable onPress={post} accessibilityRole="button" accessibilityLabel="Post comment">
-            <Text style={{ color: colors.cyan, fontFamily: fonts.bodySemi }}>Post</Text>
-          </Pressable>
+          {/* Description */}
+          <Text style={[styles.descriptionText, { color: colors.text }]}>{demo.description}</Text>
+
+          {/* Chamfered Tags */}
+          <View style={styles.tagsRow}>
+            <View style={[styles.tagPill, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.tagText, { color: colors.primary }]}>{(demo.genre || 'GENRE').toUpperCase()}</Text>
+            </View>
+          </View>
+
+          {/* Screenshots Section */}
+          <View style={styles.sectionHeaderWrap}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Screenshots</Text>
+            <LinearGradient
+              colors={[colors.primary, isDark ? 'rgba(216, 60, 255, 0.6)' : 'rgba(216, 60, 255, 0.3)', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.glowingLine}
+            />
+          </View>
+
+          {(demo.screenshotUrls?.length ?? 0) > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
+              {demo.screenshotUrls!.map((url) => (
+                <CyberCutBox
+                  key={url}
+                  cutSize={10}
+                  radius={6}
+                  fill={colors.cardFill}
+                  borderColor={colors.cardBorder}
+                  borderWidth={1}
+                  style={styles.screenshotFrame}
+                >
+                  <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
+                </CyberCutBox>
+              ))}
+            </ScrollView>
+          ) : (
+            <Text style={[styles.noCommentsText, { color: colors.muted2 }]}>
+              {isOwnDemo ? 'No screenshots yet — add some from the edit screen.' : 'No screenshots yet.'}
+            </Text>
+          )}
+
+          {/* Reviews Section */}
+          <View style={styles.sectionHeaderWrap}>
+            <View style={styles.reviewsTitleRow}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Reviews</Text>
+              {!isOwnDemo && user ? (
+                <Pressable
+                  onPress={() => setShowReviewForm((v) => !v)}
+                  style={styles.writeReviewTouch}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.writeReviewText, { color: colors.primary }]}>
+                    {showReviewForm ? 'Close ✕' : myReview ? 'Edit Review >' : 'Write One >'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <LinearGradient
+              colors={[colors.primary, isDark ? 'rgba(216, 60, 255, 0.6)' : 'rgba(216, 60, 255, 0.3)', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.glowingLine}
+            />
+          </View>
+
+          {/* Review Input Box (Collapsible / Dynamic) */}
+          {showReviewForm && !isOwnDemo && user ? (
+            <CyberCutBox
+              cutSize={12}
+              radius={6}
+              fill={colors.cardFill}
+              borderColor={colors.cardBorder}
+              borderWidth={1}
+              style={styles.reviewFormBox}
+            >
+              <View style={styles.reviewFormInner}>
+                <Text style={[styles.reviewFormHeader, { color: colors.text }]}>{myReview ? 'Update Your Review' : 'Rate this Demo'}</Text>
+                <RubricInput value={rubric} onChange={setRubric} />
+                <TextInput
+                  value={reviewComment}
+                  onChangeText={setReviewComment}
+                  placeholder="What stood out about the gameplay, art, or polish?"
+                  placeholderTextColor={colors.muted2}
+                  multiline
+                  style={[styles.reviewCommentInput, { backgroundColor: colors.inputFill, borderColor: colors.inputBorder, color: colors.text }]}
+                />
+                {reviewError ? <InlineErrorText message={reviewError} /> : null}
+                {reviewSaved ? <Text style={[styles.reviewSavedText, { color: colors.primary }]}>Review saved successfully!</Text> : null}
+                <CyberButton
+                  label={myReview ? 'Update review' : 'Submit review'}
+                  onPress={submitReview}
+                  loading={reviewSubmitting}
+                  disabled={reviewSubmitting || !rubricComplete}
+                />
+              </View>
+            </CyberCutBox>
+          ) : null}
+
+          {/* Existing User Review display */}
+          {myReview ? (
+            <CyberCutBox
+              cutSize={10}
+              radius={6}
+              fill={colors.cardFill}
+              borderColor={colors.cardBorder}
+              borderWidth={1}
+              style={styles.myReviewCard}
+            >
+              <View style={styles.myReviewInner}>
+                <View style={styles.myReviewHeader}>
+                  <Text style={[styles.myReviewUser, { color: colors.text }]}>Your Review</Text>
+                  <Text style={styles.starsText}>
+                    {'★'.repeat(
+                      Math.round(
+                        (myReview.score_gameplay +
+                          myReview.score_art +
+                          myReview.score_concept +
+                          myReview.score_polish) /
+                          4,
+                      ),
+                    )}
+                  </Text>
+                </View>
+                {myReview.comment ? <Text style={[styles.myReviewBody, { color: colors.muted }]}>{myReview.comment}</Text> : null}
+                <Pressable onPress={() => setDeleteReviewConfirm(true)} accessibilityRole="button" style={{ marginTop: 8 }}>
+                  <Text style={styles.deleteReviewText}>Delete Review</Text>
+                </Pressable>
+              </View>
+            </CyberCutBox>
+          ) : null}
+
+          {/* Other reviewers' reviews — the viewer's own is shown separately above */}
+          {reviews
+            .filter((r) => r.reviewerId !== user?.id)
+            .map((r) => {
+              const myVote = r.myVote;
+              return (
+                <CyberCutBox
+                  key={r.id}
+                  cutSize={10}
+                  radius={6}
+                  fill={colors.cardFill}
+                  borderColor={colors.cardBorder}
+                  borderWidth={1}
+                  style={styles.myReviewCard}
+                >
+                  <View style={styles.myReviewInner}>
+                    <View style={styles.myReviewHeader}>
+                      <Pressable onPress={() => useProfilePreviewStore.getState().open(r.reviewerId)} style={styles.reviewerRow}>
+                        <AvatarRing name={r.reviewer} size={24} avatarId={r.avatarId} />
+                        <Text style={[styles.myReviewUser, { color: colors.text }]}>{r.reviewer}</Text>
+                      </Pressable>
+                      <Text style={styles.starsText}>
+                        {'★'.repeat(Math.round((r.scores.gameplay + r.scores.art + r.scores.concept + r.scores.polish) / 4))}
+                      </Text>
+                    </View>
+                    {r.comment ? <Text style={[styles.myReviewBody, { color: colors.muted }]}>{r.comment}</Text> : null}
+                    {user ? (
+                      <View style={styles.voteRow}>
+                        <Pressable
+                          onPress={() => voteOnReviewAction(r.id, demo.id, myVote === 1 ? null : 1, user.id)}
+                          style={styles.voteBtn}
+                          accessibilityRole="button"
+                        >
+                          <Ionicons name="arrow-up" size={14} color={myVote === 1 ? colors.primary : colors.muted2} />
+                          <Text style={[styles.voteCount, { color: colors.muted }, myVote === 1 && { color: colors.primary }]}>{r.upvotes}</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => voteOnReviewAction(r.id, demo.id, myVote === -1 ? null : -1, user.id)}
+                          style={styles.voteBtn}
+                          accessibilityRole="button"
+                        >
+                          <Ionicons name="arrow-down" size={14} color={myVote === -1 ? '#FF3B30' : colors.muted2} />
+                          <Text style={[styles.voteCount, { color: colors.muted }, myVote === -1 && styles.voteCountActiveDown]}>{r.downvotes}</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
+                </CyberCutBox>
+              );
+            })}
+
+          {reviews.length === 0 && !showReviewForm ? (
+            <CyberCutBox
+              cutSize={10}
+              radius={6}
+              fill={colors.cardFill}
+              borderColor={colors.cardBorder}
+              borderWidth={1}
+              style={styles.emptyReviewsBox}
+            >
+              <View style={styles.emptyReviewsInner}>
+                <Ionicons name="chatbubbles-outline" size={24} color={colors.muted2} />
+                <Text style={[styles.emptyReviewsText, { color: colors.muted }]}>
+                  No reviews submitted yet. Be the first to play and review!
+                </Text>
+              </View>
+            </CyberCutBox>
+          ) : null}
+
+          {/* Comments Section */}
+          <View style={styles.sectionHeaderWrap}>
+            <View style={styles.reviewsTitleRow}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Comments</Text>
+              <Text style={[styles.commentCountText, { color: colors.muted }]}>{sorted.length}</Text>
+            </View>
+            <LinearGradient
+              colors={[colors.primary, isDark ? 'rgba(216, 60, 255, 0.6)' : 'rgba(216, 60, 255, 0.3)', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.glowingLine}
+            />
+          </View>
+
+          {sorted.length === 0 && !commentsLoading ? (
+            <Text style={[styles.noCommentsText, { color: colors.muted2 }]}>No comments yet — say how the demo felt.</Text>
+          ) : null}
+
+          {sorted.map((c) => (
+            <View key={c.id} style={styles.commentRow}>
+              <Pressable onPress={() => useProfilePreviewStore.getState().open(c.userId)}>
+                <AvatarRing name={c.userName} size={36} avatarId={c.avatarId} />
+              </Pressable>
+              <View style={styles.commentBodyWrap}>
+                <View style={styles.commentUserRow}>
+                  <Text style={[styles.commentUser, { color: colors.text }]}>{c.userName}</Text>
+                  <Text style={[styles.commentTime, { color: colors.muted2 }]}>{formatTime(c.createdAt)}</Text>
+                  {c.userId === user?.id ? (
+                    <Pressable onPress={() => setDeleteCommentId(c.id)} hitSlop={8}>
+                      <Ionicons name="trash-outline" size={14} color={colors.muted2} />
+                    </Pressable>
+                  ) : null}
+                </View>
+                <Text style={[styles.commentText, { color: colors.text }]}>{c.text}</Text>
+              </View>
+            </View>
+          ))}
+
+          {/* Comment Composer */}
+          {commentErr ? <InlineErrorText message={commentErr} /> : null}
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <CyberCutBox
+              cutSize={10}
+              radius={6}
+              fill={colors.cardFill}
+              borderColor={colors.cardBorder}
+              borderWidth={1}
+              style={styles.composerBox}
+            >
+              <View style={styles.composerInner}>
+                <AvatarRing
+                  name={user?.displayName ?? 'You'}
+                  size={30}
+                  uri={user?.avatarUri}
+                  avatarId={user?.avatarId}
+                />
+                <TextInput
+                  value={text}
+                  onChangeText={setText}
+                  placeholder="How did this demo feel?"
+                  placeholderTextColor={colors.muted2}
+                  style={[styles.composerInput, { color: colors.text }]}
+                />
+                <Pressable onPress={postComment} style={styles.postBtn}>
+                  <Text style={[styles.postBtnText, { color: colors.primary }]}>Post</Text>
+                </Pressable>
+              </View>
+            </CyberCutBox>
+          </KeyboardAvoidingView>
         </View>
-      </KeyboardAvoidingView>
-    </Screen>
+      </ScrollView>
+
+      {/* Docked Sticky Bottom Bar */}
+      <View style={[styles.bottomDockedBar, { paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.surface, borderTopColor: colors.cardBorder }]}>
+        <Pressable
+          onPress={startPlaying}
+          disabled={!demo.videoUrl}
+          style={[styles.previewBtnTouch, !demo.videoUrl && { opacity: 0.4 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Preview demo trailer"
+        >
+          <CyberCutBox
+            cutSize={10}
+            radius={4}
+            fill={colors.cardFill}
+            borderColor={colors.cardBorder}
+            borderWidth={1}
+            style={styles.previewCutBox}
+          >
+            <View style={styles.previewBtnInner}>
+              <Text style={[styles.previewBtnText, { color: colors.text }]}>Preview</Text>
+            </View>
+          </CyberCutBox>
+        </Pressable>
+
+        <Pressable
+          onPress={handlePlayAction}
+          disabled={!demo.videoUrl && !demo.externalUrl}
+          style={[styles.playDockedTouch, !demo.videoUrl && !demo.externalUrl && { opacity: 0.4 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Play demo"
+        >
+          <CyberCutBox
+            cutSize={10}
+            radius={4}
+            fill="transparent"
+            borderColor="rgba(0, 240, 255, 0.6)"
+            borderWidth={1}
+            style={styles.playDockedCutBox}
+          >
+            <LinearGradient
+              colors={['#00F0FF', '#7928CA', '#D83CFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.playDockedGradient}
+            >
+              <Ionicons name="play" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.playDockedText}>Play demo · {formatDuration(demo.durationSec)}</Text>
+            </LinearGradient>
+          </CyberCutBox>
+        </Pressable>
+      </View>
+
+      {/* Delete Confirmation Sheet */}
+      <ConfirmSheet
+        visible={deleteConfirm}
+        title="Delete this demo?"
+        body="This removes the demo, its reviews, and its comments. This can't be undone."
+        confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+        onClose={() => setDeleteConfirm(false)}
+        onConfirm={confirmDelete}
+      />
+
+      <ConfirmSheet
+        visible={deleteReviewConfirm}
+        title="Delete your review?"
+        body="This can't be undone."
+        confirmLabel={deletingReview ? 'Deleting…' : 'Delete'}
+        onClose={() => setDeleteReviewConfirm(false)}
+        onConfirm={async () => {
+          if (!id || !user) return;
+          setDeletingReview(true);
+          try {
+            await deleteReviewAction(id, user.id);
+            setDeleteReviewConfirm(false);
+          } finally {
+            setDeletingReview(false);
+          }
+        }}
+      />
+
+      <ConfirmSheet
+        visible={!!deleteCommentId}
+        title="Delete this comment?"
+        body="This can't be undone."
+        confirmLabel="Delete"
+        onClose={() => setDeleteCommentId(null)}
+        onConfirm={() => {
+          if (id && user && deleteCommentId) deleteCommentAction(id, deleteCommentId, user.id);
+          setDeleteCommentId(null);
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  player: { width: '100%', height: 220, borderRadius: radius.md, marginBottom: 8 },
-  playWrap: {
+  container: {
+    flex: 1,
+    backgroundColor: '#090F1C',
+  },
+  scrollContent: {
+    paddingTop: 0,
+  },
+  heroContainer: {
+    width: '100%',
+    position: 'relative',
+  },
+  videoPlayerWrap: {
+    width: '100%',
+    height: 280,
+    backgroundColor: '#000000',
+  },
+  heroImageWrap: {
+    width: '100%',
+    height: 280,
+    position: 'relative',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  centerPlayBtn: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    height: 220,
+    top: '40%',
+    left: '50%',
+    marginLeft: -32,
+    marginTop: -32,
+    zIndex: 4,
+  },
+  centerPlayGradient: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(11,15,28,0.35)',
-    borderRadius: radius.md,
+    shadowColor: '#00F0FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
-  iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  h: { fontFamily: fonts.display, fontSize: 24 },
-  h2: { fontFamily: fonts.display, fontSize: 18, marginTop: 20, marginBottom: 8 },
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, marginTop: 8 },
-  comment: { flexDirection: 'row', gap: 10, marginBottom: 14, alignItems: 'flex-start' },
-  composer: {
+  heroBadgesRow: {
+    position: 'absolute',
+    bottom: 54,
+    left: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    marginBottom: 24,
+    gap: 8,
+    zIndex: 3,
   },
-  input: { flex: 1, fontFamily: fonts.body, minHeight: 44 },
+  sliceBadge: {
+    backgroundColor: 'rgba(216, 60, 255, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(216, 60, 255, 0.7)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  sliceBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#D83CFF',
+    letterSpacing: 0.6,
+  },
+  heroBottomTitle: {
+    position: 'absolute',
+    bottom: 12,
+    left: 16,
+    right: 16,
+    zIndex: 3,
+  },
+  heroTitleText: {
+    fontFamily: fonts.display,
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  topActionRow: {
+    position: 'absolute',
+    top: 0,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  iconCircleBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(14, 20, 35, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topBackHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  contentWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  developerCard: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  developerCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 12,
+  },
+  devAvatarWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#00F0FF',
+    overflow: 'hidden',
+  },
+  devAvatarImg: {
+    width: '100%',
+    height: '100%',
+  },
+  devInfoWrap: {
+    flex: 1,
+  },
+  devTag: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#00F0FF',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
+  devName: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+  devLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  devLinkText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: '#8E9BB5',
+  },
+  profileBtnTouch: {
+    height: 32,
+  },
+  profileCutBox: {
+    height: 32,
+  },
+  profileBtnGradient: {
+    height: '100%',
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00F0FF',
+    letterSpacing: 0.5,
+  },
+  ratingStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  starsText: {
+    color: '#FFB800',
+    fontSize: 14,
+    letterSpacing: 1,
+  },
+  ratingScore: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  statDot: {
+    color: '#60718F',
+    fontSize: 12,
+  },
+  statReviews: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: '#8E9BB5',
+  },
+  statPlays: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: '#8E9BB5',
+  },
+  descriptionText: {
+    fontFamily: fonts.body,
+    fontSize: 13.5,
+    color: '#A6B4CE',
+    lineHeight: 21,
+    marginBottom: 14,
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
+  },
+  tagPill: {
+    backgroundColor: 'rgba(109, 53, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(109, 53, 255, 0.35)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  tagText: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#00F0FF',
+    letterSpacing: 0.5,
+  },
+  sectionHeaderWrap: {
+    marginBottom: 14,
+    marginTop: 8,
+  },
+  reviewsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  sectionTitle: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.4,
+    marginBottom: 6,
+  },
+  glowingLine: {
+    height: 2,
+    width: '100%',
+    borderRadius: 1,
+  },
+  screenshotsScroll: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingBottom: 20,
+  },
+  screenshotFrame: {
+    width: 220,
+    height: 125,
+    overflow: 'hidden',
+  },
+  screenshotImg: {
+    width: '100%',
+    height: '100%',
+  },
+  writeReviewTouch: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  writeReviewText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00F0FF',
+  },
+  reviewFormBox: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  reviewFormInner: {
+    padding: 16,
+    gap: 12,
+  },
+  reviewFormHeader: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: '#FFFFFF',
+  },
+  reviewCommentInput: {
+    borderWidth: 1,
+    borderColor: 'rgba(109, 53, 255, 0.4)',
+    borderRadius: 6,
+    backgroundColor: 'rgba(9, 15, 28, 0.6)',
+    padding: 12,
+    color: '#FFFFFF',
+    fontFamily: fonts.body,
+    fontSize: 13,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  reviewSavedText: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 12,
+    color: '#00F0FF',
+  },
+  myReviewCard: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  myReviewInner: {
+    padding: 14,
+    gap: 6,
+  },
+  myReviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  myReviewUser: {
+    fontFamily: fonts.display,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  myReviewBody: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: '#A6B4CE',
+    lineHeight: 18,
+  },
+  deleteReviewText: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 12,
+    color: '#FF4D6D',
+  },
+  reviewerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voteRow: { flexDirection: 'row', gap: 16, marginTop: 6 },
+  voteBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 32 },
+  voteCount: { fontFamily: fonts.mono, fontSize: 12, color: '#8E9BB5' },
+  voteCountActive: { color: '#00F0FF' },
+  voteCountActiveDown: { color: '#FF3B30' },
+  emptyReviewsBox: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  emptyReviewsInner: {
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyReviewsText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: '#8E9BB5',
+    textAlign: 'center',
+  },
+  commentCountText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: '#8E9BB5',
+  },
+  noCommentsText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: '#60718F',
+    marginVertical: 12,
+  },
+  commentRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 14,
+  },
+  commentBodyWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  commentUserRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  commentUser: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  commentTime: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: '#60718F',
+  },
+  commentText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: '#A6B4CE',
+    lineHeight: 18,
+  },
+  composerBox: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  composerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 10,
+  },
+  composerInput: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: '#FFFFFF',
+    minHeight: 38,
+  },
+  postBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  postBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#00F0FF',
+  },
+  editCard: {
+    marginBottom: 16,
+    gap: 10,
+  },
+  editScreenshotWrap: { width: 100, height: 70, borderRadius: 6, overflow: 'hidden', position: 'relative' },
+  removeScreenshotBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addScreenshotBtn: {
+    width: 100,
+    height: 70,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 240, 255, 0.4)',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6,
+  },
+  cancelCutTouch: { width: 110, height: 50 },
+  videoBtnTouch: { height: 46, marginBottom: 6 },
+  cancelCut: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  cancelBtn: {
+    minHeight: 48,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnText: {
+    fontFamily: fonts.bodyMed,
+    color: '#8E9BB5',
+  },
+  bottomDockedBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(9, 15, 28, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(109, 53, 255, 0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 12,
+  },
+  previewBtnTouch: {
+    width: 100,
+    height: 44,
+  },
+  previewCutBox: {
+    width: '100%',
+    height: 44,
+  },
+  previewBtnInner: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  playDockedTouch: {
+    flex: 1,
+    height: 44,
+  },
+  playDockedCutBox: {
+    width: '100%',
+    height: 44,
+  },
+  playDockedGradient: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playDockedText: {
+    fontFamily: fonts.mono,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
 });

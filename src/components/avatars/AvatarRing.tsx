@@ -2,6 +2,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { fonts, useTheme } from '../../theme';
 import { avatarUriFor, type AvatarLook } from '../../data/gamerAvatars';
+import { getCyberAvatarById } from '../../data/cyberAvatars';
 import { streakGlyph } from '../../data/streaks';
 import { useUiStore } from '../../store/uiStore';
 
@@ -30,14 +31,20 @@ export function AvatarRing({
 }) {
   const { colors, gradients } = useTheme();
   const streakEmoji = useUiStore((s) => s.streakEmoji);
-  const src = uri || avatarUriFor(avatarId, name, look);
+  const isCyber = avatarId?.startsWith('male_') || avatarId?.startsWith('female_');
+  const cyberAvatar = isCyber ? getCyberAvatarById(avatarId) : null;
+  const imageSource = uri
+    ? { uri }
+    : cyberAvatar
+    ? cyberAvatar.source
+    : { uri: avatarUriFor(avatarId, name, look) };
   const showOnline = online ?? live;
   const caption = shortName ?? name;
   return (
     <View style={{ width: Math.max(size, showName ? 72 : size), alignItems: 'center' }}>
       <LinearGradient colors={gradients.liveRing} style={[styles.ring, { width: size, height: size, borderRadius: size / 2 }]}>
         <Image
-          source={{ uri: src }}
+          source={imageSource}
           style={{ width: size - 6, height: size - 6, borderRadius: (size - 6) / 2, backgroundColor: colors.surfaceElevated }}
         />
       </LinearGradient>

@@ -1,6 +1,6 @@
 export const fonts = {
-  display: 'Outfit_700Bold',
-  displayMed: 'Outfit_600SemiBold',
+  display: 'ChakraPetch_700Bold',
+  displayMed: 'ChakraPetch_600SemiBold',
   body: 'PlusJakartaSans_400Regular',
   bodyMed: 'PlusJakartaSans_500Medium',
   bodySemi: 'PlusJakartaSans_600SemiBold',

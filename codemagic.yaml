@@ -1,0 +1,65 @@
+# Codemagic CI/CD template — a starting point, not a live pipeline. Nothing in this file
+# creates or touches any Codemagic/Apple/Google account; you connect this repo to your own
+# Codemagic account (codemagic.io) and fill in the placeholders below when you're ready.
+# Until then this file does nothing on its own — Codemagic only runs it once a workflow is
+# actually connected to a Codemagic app in your account.
+
+workflows:
+  reapers-typecheck:
+    name: Typecheck (PR gate)
+    max_build_duration: 15
+    instance_type: linux_x2
+    triggering:
+      events:
+        - pull_request
+      branch_patterns:
+        - pattern: '*'
+          include: true
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Typecheck
+        script: npx tsc --noEmit
+
+  reapers-android-build:
+    name: Android build (fill in signing before use)
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      # Set these in Codemagic's UI (Environment variables / Code signing identities) —
+      # never commit real values here. EXPO_TOKEN is an Expo access token from your own
+      # Expo/EAS account; ANDROID_KEYSTORE_* are your own upload keystore, generated via
+      # `eas credentials` or your own Play Console setup.
+      vars:
+        EXPO_TOKEN: $EXPO_TOKEN
+      node: 20
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Typecheck
+        script: npx tsc --noEmit
+      - name: EAS build (Android)
+        script: npx eas-cli build --platform android --non-interactive --profile production
+    artifacts:
+      - build/**/*.aab
+      - build/**/*.apk
+
+  reapers-ios-build:
+    name: iOS build (needs your own Apple Developer account — fill in before use)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      # ios_signing / App Store Connect integration are configured in Codemagic's UI against
+      # *your* Apple Developer account — this file never names or assumes a specific account.
+      vars:
+        EXPO_TOKEN: $EXPO_TOKEN
+      node: 20
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+      - name: Typecheck
+        script: npx tsc --noEmit
+      - name: EAS build (iOS)
+        script: npx eas-cli build --platform ios --non-interactive --profile production
+    artifacts:
+      - build/**/*.ipa

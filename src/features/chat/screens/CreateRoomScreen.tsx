@@ -1,17 +1,19 @@
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import { Image, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import type { MainStackParamList } from '../../../navigation/types';
 import { PrimaryButton } from '../../../components/buttons/PrimaryButton';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
-import { SegmentedToggle } from '../../../components/inputs/SegmentedToggle';
 import { FormDivider, FormSection } from '../../../components/layout/FormSection';
 import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
-import { useCommunityStore } from '../../../store/communityStore';
+import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
+import { useAuth } from '../../../hooks/useAuth';
+import { useChatStore } from '../../../store/chatStore';
+import { uploadImage } from '../../../services/supabase/storage';
 import { fonts, radius, useTheme } from '../../../theme';
 
 const TAG_IDEAS = ['Valorant', 'Dev', 'Jam', 'Art', 'Esports', 'Unity', 'Unreal', 'Music'];
@@ -19,60 +21,58 @@ const TAG_IDEAS = ['Valorant', 'Dev', 'Jam', 'Art', 'Esports', 'Unity', 'Unreal'
 export function CreateRoomScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { colors } = useTheme();
-  const createRoom = useCommunityStore((s) => s.createRoom);
+  const { user } = useAuth();
+  const createRoom = useChatStore((s) => s.createRoom);
   const [name, setName] = useState('');
   const [tag, setTag] = useState('');
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [requiresApproval, setRequiresApproval] = useState(false);
   const [avatar, setAvatar] = useState<string | undefined>();
-  const [kind, setKind] = useState<'room' | 'server'>('room');
   const [err, setErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr] = useState('');
 
-  const isServer = kind === 'server';
   const valid = name.trim().length >= 3;
-  const noun = isServer ? 'server' : 'room';
 
   const pick = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
     if (!res.canceled) setAvatar(res.assets[0]?.uri);
   };
 
-  const submit = () => {
-    if (!valid) {
+  const submit = async () => {
+    if (!valid || !user) {
       setErr('Name is required');
       return;
     }
-    const id = createRoom({
-      name: name.trim(),
-      description: description.trim(),
-      isPrivate,
-      avatar,
-      kind,
-      tag: isServer ? 'Server' : tag.trim() || 'Dev',
-      serverRegion: isServer ? name.trim() : undefined,
-    });
-    nav.replace('ChatDetail', { id });
+    setSubmitting(true);
+    setSubmitErr('');
+    try {
+      const avatarUrl = avatar ? await uploadImage('community-logos', user.id, avatar) : undefined;
+      const id = await createRoom(user.id, {
+        name: name.trim(),
+        description: description.trim(),
+        isPrivate,
+        requiresApproval: !isPrivate && requiresApproval,
+        avatar: avatarUrl,
+        kind: 'room',
+        tag: tag.trim() || 'Dev',
+      });
+      nav.replace('ChatDetail', { id });
+    } catch (e) {
+      setSubmitErr(e instanceof Error ? e.message : 'Could not create room');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <Screen footerPad={false}>
-      <ScreenHeader title="Create" onBack={() => nav.goBack()} />
+      <ScreenHeader title="Create room" onBack={() => nav.goBack()} />
 
-      <SegmentedToggle
-        options={[
-          { value: 'room', label: 'Room', icon: 'chatbubbles-outline' },
-          { value: 'server', label: 'Server', icon: 'server-outline' },
-        ]}
-        value={kind}
-        onChange={setKind}
-      />
-      <Text style={[styles.blurb, { color: colors.muted }]}>
-        {isServer
-          ? 'A server is a regional hub that can hold many rooms and a bigger crew.'
-          : 'A room is a single chat channel for one topic, squad, or game.'}
-      </Text>
+      <Text style={[styles.blurb, { color: colors.muted }]}>A room is a single chat channel for one topic, squad, or game.</Text>
 
-      <FormSection title={`${noun} identity`} style={{ paddingBottom: 2 }}>
+      <FormSection title="Room identity" style={{ paddingBottom: 2 }}>
         <View style={styles.imageRow}>
           <Pressable
             onPress={pick}
@@ -87,7 +87,7 @@ export function CreateRoomScreen() {
             )}
           </Pressable>
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={[styles.tileTitle, { color: colors.text }]}>{isServer ? 'Server' : 'Room'} image</Text>
+            <Text style={[styles.tileTitle, { color: colors.text }]}>Room image</Text>
             <Text style={[styles.tileHint, { color: colors.muted2 }]}>A square PNG or JPG looks best.</Text>
             <View style={styles.tileActions}>
               <Pressable onPress={pick} hitSlop={8} accessibilityRole="button">
@@ -111,36 +111,31 @@ export function CreateRoomScreen() {
           error={err}
           maxLength={30}
           showCount
-          placeholder={isServer ? 'South Asia' : 'valorant-ranked'}
-          hint={isServer ? 'Also used as the server region.' : undefined}
+          placeholder="valorant-ranked"
           onBlur={() => setErr(name.trim().length < 3 ? 'Name is required' : '')}
         />
 
-        {isServer ? null : (
-          <>
-            <AuthTextField label="Tag" value={tag} onChangeText={setTag} maxLength={16} placeholder="Dev" />
-            <View style={styles.ideas}>
-              {TAG_IDEAS.map((t) => {
-                const on = tag.trim().toLowerCase() === t.toLowerCase();
-                return (
-                  <Pressable
-                    key={t}
-                    onPress={() => setTag(on ? '' : t)}
-                    style={[
-                      styles.idea,
-                      { borderColor: colors.border },
-                      on && { borderColor: colors.magenta, backgroundColor: colors.magentaDeep },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                  >
-                    <Text style={{ color: on ? colors.text : colors.muted, fontFamily: fonts.bodyMed, fontSize: 12 }}>{t}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </>
-        )}
+        <AuthTextField label="Tag" value={tag} onChangeText={setTag} maxLength={16} placeholder="Dev" />
+        <View style={styles.ideas}>
+          {TAG_IDEAS.map((t) => {
+            const on = tag.trim().toLowerCase() === t.toLowerCase();
+            return (
+              <Pressable
+                key={t}
+                onPress={() => setTag(on ? '' : t)}
+                style={[
+                  styles.idea,
+                  { borderColor: colors.border },
+                  on && { borderColor: colors.magenta, backgroundColor: colors.magentaDeep },
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+              >
+                <Text style={{ color: on ? colors.text : colors.muted, fontFamily: fonts.bodyMed, fontSize: 12 }}>{t}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </FormSection>
 
       <FormSection title="About" style={{ paddingBottom: 2 }}>
@@ -151,7 +146,7 @@ export function CreateRoomScreen() {
           multiline
           maxLength={240}
           showCount
-          placeholder={`What happens in this ${noun}?`}
+          placeholder="What happens in this room?"
         />
       </FormSection>
 
@@ -179,9 +174,37 @@ export function CreateRoomScreen() {
             accessibilityLabel="Private"
           />
         </View>
+
+        {!isPrivate ? (
+          <>
+            <FormDivider />
+            <View style={styles.toggleRow}>
+              <View style={[styles.toggleIcon, { backgroundColor: requiresApproval ? colors.magentaDeep : colors.surfaceElevated }]}>
+                <Ionicons name="checkmark-done-outline" size={18} color={requiresApproval ? colors.magenta : colors.cyan} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.toggleTitle, { color: colors.text }]}>Require approval to join</Text>
+                <Text style={[styles.toggleSub, { color: colors.muted }]}>
+                  {requiresApproval
+                    ? "Tapping Join sends a request you approve or reject."
+                    : 'Anyone can tap Join and be in immediately.'}
+                </Text>
+              </View>
+              <Switch
+                value={requiresApproval}
+                onValueChange={setRequiresApproval}
+                trackColor={{ false: colors.surfaceElevated, true: colors.magentaDeep }}
+                thumbColor={requiresApproval ? colors.magenta : colors.muted2}
+                ios_backgroundColor={colors.surfaceElevated}
+                accessibilityLabel="Require approval to join"
+              />
+            </View>
+          </>
+        ) : null}
       </FormSection>
 
-      <PrimaryButton label={`Create ${noun}`} onPress={submit} disabled={!valid} />
+      {submitErr ? <InlineErrorText message={submitErr} /> : null}
+      <PrimaryButton label="Create room" onPress={submit} loading={submitting} disabled={!valid || submitting} />
       <Pressable onPress={() => nav.goBack()} style={[styles.cancel, { borderColor: colors.border }]} accessibilityRole="button">
         <Text style={{ color: colors.muted, fontFamily: fonts.bodyMed }}>Cancel</Text>
       </Pressable>

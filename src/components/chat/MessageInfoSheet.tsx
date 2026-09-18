@@ -1,7 +1,8 @@
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AvatarRing } from '../avatars/AvatarRing';
+import { useProfilePreviewStore } from '../../store/profilePreviewStore';
 import { fonts, radius, useTheme } from '../../theme';
 import { formatTime } from '../../utils/format';
 import type { ChatMessage } from '../../types/chat';
@@ -47,13 +48,13 @@ export function MessageInfoSheet({
               <Text style={{ color: colors.muted, fontFamily: fonts.body, marginTop: 8 }}>No one has seen this yet.</Text>
             ) : (
               read.map((r) => (
-                <View key={r.userId} style={styles.row}>
+                <Pressable key={r.userId} onPress={() => useProfilePreviewStore.getState().open(r.userId)} style={styles.row} accessibilityRole="button">
                   <AvatarRing name={r.name} size={44} avatarId={r.avatarId} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontFamily: fonts.bodySemi }}>{r.name}</Text>
                     <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 12 }}>Seen {formatTime(r.readAt!)}</Text>
                   </View>
-                </View>
+                </Pressable>
               ))
             )}
           </View>
@@ -68,13 +69,13 @@ export function MessageInfoSheet({
               <Text style={{ color: colors.muted, fontFamily: fonts.body, marginTop: 8 }}>Everyone who got it has also seen it.</Text>
             ) : (
               deliveredOnly.map((r) => (
-                <View key={r.userId} style={styles.row}>
+                <Pressable key={r.userId} onPress={() => useProfilePreviewStore.getState().open(r.userId)} style={styles.row} accessibilityRole="button">
                   <AvatarRing name={r.name} size={44} avatarId={r.avatarId} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontFamily: fonts.bodySemi }}>{r.name}</Text>
                     <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 12 }}>Delivered {formatTime(r.deliveredAt)}</Text>
                   </View>
-                </View>
+                </Pressable>
               ))
             )}
           </View>

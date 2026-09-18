@@ -10,7 +10,7 @@ export type Demo = {
   title: string;
   genre: string;
   description: string;
-  thumbnail: string;
+  thumbnail?: string;
   videoUrl?: string;
   durationSec: number;
   developerId: string;
@@ -19,4 +19,8 @@ export type Demo = {
   scores: RubricScores;
   reviewCount: number;
   externalUrl?: string;
+  isJamEntry: boolean;
+  playCount?: number;
+  screenshotUrls?: string[];
+  createdAt: string;
 };

@@ -7,6 +7,7 @@ export type Chatroom = {
   description: string;
   memberCount: number;
   lastMessage: string;
+  lastMessageAt?: string;
   unread: number;
   joined: boolean;
   kind?: 'room' | 'dm' | 'server' | 'global';
@@ -15,11 +16,43 @@ export type Chatroom = {
   lastChatAt?: string;
   peerId?: string;
   isPrivate?: boolean;
+  requiresApproval?: boolean;
   pinned?: boolean;
   muted?: boolean;
   avatar?: string;
   communityId?: string;
   logo?: ImageSourcePropType;
+  createdBy?: string;
+  myRole?: 'owner' | 'admin' | 'member';
+};
+
+export type RoomMember = {
+  userId: string;
+  name: string;
+  avatarUri?: string;
+  avatarId?: string;
+  role: 'owner' | 'admin' | 'member';
+};
+
+export type RoomInvite = {
+  id: string;
+  chatroomId: string;
+  roomName: string;
+  inviterId: string;
+  inviterName: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+};
+
+export type RoomJoinRequest = {
+  id: string;
+  chatroomId: string;
+  requesterId: string;
+  requesterName: string;
+  requesterAvatarUri?: string;
+  requesterAvatarId?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
 };
 
 export type ChatMessage = {
@@ -34,10 +67,12 @@ export type ChatMessage = {
   mine?: boolean;
   edited?: boolean;
   deleted?: boolean;
-  kind?: 'text' | 'gif' | 'voice';
+  kind?: 'text' | 'gif' | 'voice' | 'image' | 'video';
   gifUri?: string;
   voiceDurationSec?: number;
-  reactions?: { emoji: string; users: string[] }[];
+  mediaUrl?: string;
+  mediaThumbnailUrl?: string;
+  reactions?: { emoji: string; count: number; mine: boolean }[];
   starred?: boolean;
   pinned?: boolean;
   forwarded?: boolean;

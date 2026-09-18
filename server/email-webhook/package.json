@@ -1,0 +1,12 @@
+{
+  "name": "reapers-email-webhook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server-example.mjs"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.14",
+    "standardwebhooks": "^1.0.0"
+  }
+}

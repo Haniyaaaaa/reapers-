@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import * as Network from 'expo-network';
-import { useCommunityStore } from '../store/communityStore';
+import { useAuthStore } from '../store/authStore';
+import { useChatStore } from '../store/chatStore';
 import { useUiStore } from '../store/uiStore';
 
 export function useOffline() {
@@ -18,7 +19,8 @@ export function useConnectivity() {
     const sub = Network.addNetworkStateListener((state) => {
       const online = state.isConnected !== false;
       useUiStore.getState().setConnected(online);
-      if (online) useCommunityStore.getState().retryFailedMessages();
+      const userId = useAuthStore.getState().session?.user.id;
+      if (online && userId) useChatStore.getState().retryAllFailed(userId);
     });
     return () => {
       mounted = false;

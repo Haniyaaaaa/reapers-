@@ -1,18 +1,42 @@
 {
   "expo": {
-    "name": "reapers",
+    "name": "Reapers",
     "slug": "reapers",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/logo.jpeg",
+    "icon": "./assets/icon.png",
     "scheme": "reapers",
     "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "assets/icon.png",
+      "assets/favicon.png",
+      "assets/android-icon-*.png",
+      "assets/reaper-mark.png",
+      "assets/logo.jpeg",
+      "assets/login-bg.webp",
+      "assets/sounds/*.wav",
+      "assets/avatars/extracted/*.jpg",
+      "CommunityLogos/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.reapers.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Reapers uses your camera to take a profile photo, demo cover, or event cover image.",
+        "NSPhotoLibraryUsageDescription": "Reapers needs access to your photo library to pick a profile photo, demo video/thumbnail, room icon, community logo, or event cover.",
+        "NSMicrophoneUsageDescription": "Reapers needs microphone access to record audio for demo videos you upload."
+      }
     },
     "android": {
+      "package": "com.reapers.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
-        "backgroundColor": "#0B0F1C",
+        "backgroundColor": "#090F1C",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -20,13 +44,49 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/logo.jpeg"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font",
       "expo-image-picker",
-      "expo-splash-screen",
-      "expo-video"
-    ]
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#090F1C",
+          "image": "./assets/reaper-mark.png",
+          "imageWidth": 160,
+          "dark": {
+            "backgroundColor": "#090F1C"
+          }
+        }
+      ],
+      "expo-video",
+      "expo-web-browser",
+      "@sentry/react-native",
+      "expo-audio",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Reapers uses your location to tag physical events you host and to find events near you."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4794b3f6-0e75-41a5-89ca-2ca6030b63f4"
+      }
+    },
+    "owner": "reaperss-team"
   }
 }

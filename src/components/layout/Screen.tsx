@@ -1,37 +1,44 @@
-import { ReactNode, useMemo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ReactElement, ReactNode, useMemo } from 'react';
+import { RefreshControlProps, ScrollView, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { space, useTheme } from '../../theme';
 import { OfflineBanner } from '../feedback/OfflineBanner';
 import { useOffline } from '../../hooks/useOffline';
+import { CyberBackground } from '../cyber/CyberBackground';
 
 type Props = {
   children: ReactNode;
   scroll?: boolean;
   padded?: boolean;
   footerPad?: boolean;
+  refreshControl?: ReactElement<RefreshControlProps>;
 };
 
-export function Screen({ children, scroll = true, padded = true, footerPad = true }: Props) {
+export function Screen({ children, scroll = true, padded = true, footerPad = true, refreshControl }: Props) {
   const insets = useSafeAreaInsets();
   const offline = useOffline();
-  const { colors, gradients } = useTheme();
+  const { colors } = useTheme();
   const pad = {
     paddingHorizontal: padded ? space.lg : 0,
     paddingBottom: footerPad ? 108 : insets.bottom + 16,
   };
   return (
-    <LinearGradient colors={gradients.background} style={[styles.fill, { backgroundColor: colors.bg }]}>
+    <View style={[styles.fill, { backgroundColor: colors.background }]}>
+      <CyberBackground />
       {offline ? <OfflineBanner /> : null}
       {scroll ? (
-        <ScrollView contentContainerStyle={[pad, { paddingTop: insets.top + 12 }]} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[pad, { paddingTop: insets.top + 12 }]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
+        >
           {children}
         </ScrollView>
       ) : (
         <View style={[styles.fill, pad, { paddingTop: insets.top + 12 }]}>{children}</View>
       )}
-    </LinearGradient>
+    </View>
   );
 }
 
