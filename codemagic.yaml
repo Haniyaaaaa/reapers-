@@ -17,9 +17,9 @@ workflows:
           include: true
     scripts:
       - name: Install dependencies
-        script: npm ci
+        script: npm i -g pnpm@11 && pnpm install --frozen-lockfile
       - name: Typecheck
-        script: npx tsc --noEmit
+        script: pnpm exec tsc --noEmit
 
   reapers-android-build:
     name: Android build (fill in signing before use)
@@ -32,12 +32,12 @@ workflows:
       # `eas credentials` or your own Play Console setup.
       vars:
         EXPO_TOKEN: $EXPO_TOKEN
-      node: 20
+      node: 22
     scripts:
       - name: Install dependencies
-        script: npm ci
+        script: npm i -g pnpm@11 && pnpm install --frozen-lockfile
       - name: Typecheck
-        script: npx tsc --noEmit
+        script: pnpm exec tsc --noEmit
       - name: EAS build (Android)
         script: npx eas-cli build --platform android --non-interactive --profile production
     artifacts:
@@ -53,12 +53,12 @@ workflows:
       # *your* Apple Developer account — this file never names or assumes a specific account.
       vars:
         EXPO_TOKEN: $EXPO_TOKEN
-      node: 20
+      node: 22
     scripts:
       - name: Install dependencies
-        script: npm ci
+        script: npm i -g pnpm@11 && pnpm install --frozen-lockfile
       - name: Typecheck
-        script: npx tsc --noEmit
+        script: pnpm exec tsc --noEmit
       - name: EAS build (iOS)
         script: npx eas-cli build --platform ios --non-interactive --profile production
     artifacts:
