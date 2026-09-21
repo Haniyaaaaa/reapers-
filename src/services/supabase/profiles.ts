@@ -92,3 +92,13 @@ export async function isUsernameAvailable(username: string, excludingUserId?: st
   if (error) throw error;
   return (data?.length ?? 0) === 0;
 }
+
+export type ProfileStats = { connections: number; sessions: number };
+
+/** Accepted connections + sessions delivered as an expert (see 0076_profile_stats.sql). */
+export async function getProfileStats(userId: string): Promise<ProfileStats> {
+  const { data, error } = await supabase.rpc('profile_stats', { p_user_id: userId });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as { connections_count: number; sessions_count: number } | null;
+  return { connections: row?.connections_count ?? 0, sessions: row?.sessions_count ?? 0 };
+}

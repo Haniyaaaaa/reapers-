@@ -33,6 +33,7 @@ import { EMPTY_ARRAY } from '../../../utils/emptyArray';
 import type { ExpertSlot } from '../../../types/extra';
 import type { ExpertReview } from '../../../types/expert';
 import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { openExternalUrl } from '../../../utils/openUrl';
 
 export function ExpertProfileScreen() {
   const route = useRoute<RouteProp<MainStackParamList, 'ExpertProfile'>>();
@@ -124,7 +125,6 @@ export function ExpertProfileScreen() {
     setPick(null);
   };
 
-  const openUrl = (url: string) => Linking.openURL(url.startsWith('http') ? url : `https://${url}`);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -184,34 +184,28 @@ export function ExpertProfileScreen() {
           {expert.bio || 'Industry expert with more than 15 years of experience.'}
         </Text>
 
-        {/* Specialties Tags */}
-        <View style={styles.specialtiesRow}>
-          <Text style={[styles.specialtiesText, { color: colors.primary }]}>
-            {(expert.specialties.length > 0 ? expert.specialties : ['Systems', 'Live ops', 'Netcode']).join('  ·  ')}
-          </Text>
-        </View>
+        {/* Specialties */}
+        {expert.specialties.length > 0 ? (
+          <View style={styles.chipsRow}>
+            {expert.specialties.map((tag) => (
+              <View key={tag} style={[styles.specialtyChip, { borderColor: `${colors.primary}66`, backgroundColor: `${colors.primary}14` }]}>
+                <Text style={[styles.specialtyChipText, { color: colors.primary }]}>{tag.toUpperCase()}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
-        {/* Portfolio & Links */}
-        <View style={styles.linksGroup}>
-          {expert.portfolioUrl ? (
-            <Pressable onPress={() => openUrl(expert.portfolioUrl!)} style={styles.linkTouch} accessibilityRole="link">
-              <Ionicons name="link-outline" size={16} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>Work / portfolio</Text>
-            </Pressable>
-          ) : (
-            <Pressable onPress={() => {}} style={styles.linkTouch} accessibilityRole="link">
-              <Ionicons name="link-outline" size={16} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>Work / portfolio</Text>
-            </Pressable>
-          )}
-
-          {expert.linkedinUrl ? (
-            <Pressable onPress={() => openUrl(expert.linkedinUrl!)} style={styles.linkTouch} accessibilityRole="link">
-              <Ionicons name="logo-linkedin" size={16} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>LinkedIn profile</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        {/* Portfolio & Links — only real links; an empty one used to render as a dead button */}
+        {expert.portfolioUrl || expert.linkedinUrl ? (
+          <View style={styles.linksRow}>
+            {expert.portfolioUrl ? (
+              <LinkCard icon="link-outline" label="Portfolio" hint="View work" onPress={() => openExternalUrl(expert.portfolioUrl)} />
+            ) : null}
+            {expert.linkedinUrl ? (
+              <LinkCard icon="logo-linkedin" label="LinkedIn" hint="View profile" onPress={() => openExternalUrl(expert.linkedinUrl)} />
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Section: Book a Session */}
         <View style={styles.sectionHeaderWrap}>
@@ -452,30 +446,55 @@ const styles = StyleSheet.create({
     color: '#A6B4CE',
     lineHeight: 20,
   },
-  specialtiesRow: {
-    marginVertical: 2,
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  specialtiesText: {
+  specialtyChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  specialtyChipText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#00F0FF',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    letterSpacing: 1,
   },
-  linksGroup: {
-    gap: 6,
-    marginBottom: 6,
+  linksRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  linkTouch: {
+  linkCardPress: {
+    flex: 1,
+  },
+  linkCardInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
-  linkText: {
+  linkIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkCardText: {
+    flex: 1,
+  },
+  linkCardLabel: {
     fontFamily: fonts.bodyMed,
-    fontSize: 13,
-    color: '#00F0FF',
+    fontSize: 14,
+  },
+  linkCardHint: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginTop: 1,
   },
   sectionHeaderWrap: {
     marginTop: 8,
@@ -533,3 +552,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+function LinkCard({ icon, label, hint, onPress }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; hint: string; onPress: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="link" accessibilityLabel={`${label}, ${hint}`} style={({ pressed }) => [styles.linkCardPress, pressed && { opacity: 0.8 }]}>
+      <CyberCutBox cutSize={10} radius={8} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={0.88}>
+        <View style={styles.linkCardInner}>
+          <View style={[styles.linkIconWrap, { borderColor: `${colors.primary}55`, backgroundColor: `${colors.primary}1A` }]}>
+            <Ionicons name={icon} size={17} color={colors.primary} />
+          </View>
+          <View style={styles.linkCardText}>
+            <Text style={[styles.linkCardLabel, { color: colors.text }]} numberOfLines={1}>{label}</Text>
+            <Text style={[styles.linkCardHint, { color: colors.muted }]} numberOfLines={1}>{hint}</Text>
+          </View>
+          <Ionicons name="arrow-up-outline" size={14} color={colors.muted} style={{ transform: [{ rotate: '45deg' }] }} />
+        </View>
+      </CyberCutBox>
+    </Pressable>
+  );
+}

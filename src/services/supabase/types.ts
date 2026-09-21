@@ -1004,6 +1004,10 @@ export type Database = {
         Args: { viewer_id: string };
         Returns: Database['public']['Tables']['profiles']['Row'][];
       };
+      profile_stats: {
+        Args: { p_user_id: string };
+        Returns: { connections_count: number; sessions_count: number }[];
+      };
       effective_limits: {
         Args: { uid: string };
         Returns: { community_limit: number | null; event_limit: number | null; demo_upload_allowed: boolean; avatar_custom_allowed: boolean; expert_booking_allowed: boolean }[];

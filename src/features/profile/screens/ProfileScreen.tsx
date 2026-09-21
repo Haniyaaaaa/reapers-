@@ -35,11 +35,12 @@ import { useDemoStore } from '../../../store/demoStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { useSubscriptionStore } from '../../../store/subscriptionStore';
 import { useCommunitiesStore } from '../../../store/communitiesStore';
-import { getProfile, profileRowToUser } from '../../../services/supabase/profiles';
+import { getProfile, getProfileStats, profileRowToUser, type ProfileStats } from '../../../services/supabase/profiles';
 import { fonts, useTheme } from '../../../theme';
 import type { Role, User } from '../../../types/user';
 import { CutAvatar } from '../../../components/avatars/CutAvatar';
 import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
+import { ProfileMenu } from '../components/ProfileMenu';
 import { VerifiedSeal } from '../../../components/experts/ExpertBadge';
 import { STALE_MS } from '../../../store/swr';
 
@@ -128,6 +129,23 @@ export function ProfileScreen() {
   }, [saveMsg]);
 
   const portfolioOwnerId = isOwn ? user?.id : params?.id;
+
+  const [stats, setStats] = useState<ProfileStats>({ connections: 0, sessions: 0 });
+  // Refetch on focus: connections get accepted and sessions end while this screen stays mounted.
+  useFocusEffect(
+    useCallback(() => {
+      if (!portfolioOwnerId) return;
+      let cancelled = false;
+      getProfileStats(portfolioOwnerId)
+        .then((next) => {
+          if (!cancelled) setStats(next);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [portfolioOwnerId]),
+  );
 
   useEffect(() => {
     if (portfolioOwnerId) fetchDemosByDeveloper(portfolioOwnerId);
@@ -329,6 +347,8 @@ export function ProfileScreen() {
         {/* 1. USER IDENTITY HEADER */}
         <View style={styles.identitySection}>
           <View style={styles.avatarWrap}>
+            <View pointerEvents="none" style={[styles.halo, styles.haloOuter, { backgroundColor: isExpert ? 'rgba(245, 197, 66, 0.07)' : 'rgba(109, 53, 255, 0.10)' }]} />
+            <View pointerEvents="none" style={[styles.halo, styles.haloInner, { backgroundColor: isExpert ? 'rgba(245, 197, 66, 0.12)' : 'rgba(216, 60, 255, 0.14)' }]} />
             <CutAvatar
               source={resolveAvatarSource(profile?.avatarUri, profile?.avatarId || 'male_1')}
               size={90}
@@ -402,8 +422,9 @@ export function ProfileScreen() {
             style={styles.statTileCut}
           >
             <View style={styles.statTileInner}>
-              <Text style={[styles.statNumText, { color: colors.text }]}>{portfolio.length}</Text>
-              <Text style={[styles.statLabelText, { color: colors.muted }]}>PROJECTS</Text>
+              <Ionicons name="videocam-outline" size={16} color={colors.cyan} />
+              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.sessions.toLocaleString()}</Text>
+              <Text style={[styles.statLabelText, { color: colors.muted }]}>SESSIONS</Text>
             </View>
           </CyberCutBox>
 
@@ -416,6 +437,7 @@ export function ProfileScreen() {
             style={styles.statTileCut}
           >
             <View style={styles.statTileInner}>
+              <Ionicons name="people-outline" size={16} color="#6D9BFF" />
               <Text style={[styles.statNumText, { color: colors.text }]}>{isOwn ? communities.filter((c) => c.joined).length : 0}</Text>
               <Text style={[styles.statLabelText, { color: colors.muted }]}>COMMUNITIES</Text>
             </View>
@@ -430,20 +452,23 @@ export function ProfileScreen() {
             style={styles.statTileCut}
           >
             <View style={styles.statTileInner}>
-              <Text style={[styles.statNumText, { color: colors.text }]}>{(profile?.credibility ?? 0).toLocaleString()}</Text>
-              <Text style={[styles.statLabelText, { color: colors.muted }]}>REPUTATION</Text>
+              <Ionicons name="git-network-outline" size={16} color="#D83CFF" />
+              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.connections.toLocaleString()}</Text>
+              <Text style={[styles.statLabelText, { color: colors.muted }]}>CONNECTIONS</Text>
             </View>
           </CyberCutBox>
         </View>
 
         {/* 3. ABOUT / BIO GLASS CARD */}
         {!editing ? (
+          <View>
+          <SectionLabel text="ABOUT" />
           <CyberCutBox
             cutSize={14}
             radius={8}
             fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
+            borderColor="rgba(0, 229, 255, 0.28)"
+            borderWidth={1}
             style={styles.aboutCardBox}
           >
             <View style={styles.aboutCardInner}>
@@ -453,48 +478,61 @@ export function ProfileScreen() {
               </Text>
 
               {/* Skill Tags */}
-              <View style={styles.skillBadgesRow}>
-                {(skills.length > 0 ? skills : ['UNITY', 'C#', 'NETCODE', 'GAMEPLAY SYSTEMS', 'SHADERS', 'LEVEL DESIGN']).map((t) => (
-                  <View key={t} style={[styles.skillPill, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]}>
-                    <Text style={[styles.skillPillText, { color: colors.muted }]}>{t.toUpperCase()}</Text>
-                  </View>
-                ))}
-              </View>
+              {skills.length > 0 ? (
+                <View style={styles.skillBadgesRow}>
+                  {skills.map((t) => (
+                    <View key={t} style={[styles.skillPill, { backgroundColor: 'rgba(0, 229, 255, 0.08)', borderColor: 'rgba(0, 229, 255, 0.35)' }]}>
+                      <Text style={[styles.skillPillText, { color: colors.cyan }]}>{t.toUpperCase()}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
 
               {/* Location & Experience Meta Rows */}
-              <View style={styles.metaInfoGroup}>
-                {profile?.location ? (
-                  <View style={styles.metaInfoRow}>
-                    <Ionicons name="location-outline" size={15} color={colors.electricAccent} />
-                    <Text style={[styles.metaInfoText, { color: colors.muted }]}>{profile.location}</Text>
-                  </View>
-                ) : null}
+              {profile?.location || profile?.yearsExperience != null ? (
+                <View style={styles.metaInfoGroup}>
+                  {profile?.location ? (
+                    <View style={styles.metaInfoRow}>
+                      <View style={[styles.metaIcon, { borderColor: 'rgba(0, 229, 255, 0.35)', backgroundColor: 'rgba(0, 229, 255, 0.10)' }]}>
+                        <Ionicons name="location-outline" size={14} color={colors.cyan} />
+                      </View>
+                      <Text style={[styles.metaInfoText, { color: colors.text }]}>{profile.location}</Text>
+                    </View>
+                  ) : null}
+                  {profile?.yearsExperience != null ? (
+                    <View style={styles.metaInfoRow}>
+                      <View style={[styles.metaIcon, { borderColor: 'rgba(216, 60, 255, 0.4)', backgroundColor: 'rgba(216, 60, 255, 0.12)' }]}>
+                        <Ionicons name="briefcase-outline" size={14} color="#D83CFF" />
+                      </View>
+                      <Text style={[styles.metaInfoText, { color: colors.text }]}>
+                        {profile.yearsExperience} {profile.yearsExperience === 1 ? 'yr' : 'yrs'} experience
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
-                {profile?.yearsExperience != null ? (
-                  <View style={styles.metaInfoRow}>
-                    <Ionicons name="briefcase-outline" size={15} color="#D83CFF" />
-                    <Text style={[styles.metaInfoText, { color: colors.muted }]}>
-                      {profile.yearsExperience} {profile.yearsExperience === 1 ? 'yr' : 'yrs'} experience
-                    </Text>
-                  </View>
-                ) : null}
-
-                {profile?.portfolioUrl ? (
-                  <Pressable onPress={() => openLink(profile.portfolioUrl!)} style={styles.metaInfoRow}>
-                    <Ionicons name="globe-outline" size={15} color={colors.primary} />
-                    <Text style={[styles.metaInfoText, { color: colors.primary }]}>Portfolio</Text>
-                  </Pressable>
-                ) : null}
-
-                {profile?.linkedinUrl ? (
-                  <Pressable onPress={() => openLink(profile.linkedinUrl!)} style={styles.metaInfoRow}>
-                    <Ionicons name="logo-linkedin" size={15} color={colors.primary} />
-                    <Text style={[styles.metaInfoText, { color: colors.primary }]}>LinkedIn</Text>
-                  </Pressable>
-                ) : null}
-              </View>
+              {profile?.portfolioUrl || profile?.linkedinUrl ? (
+                <View style={styles.profileLinksRow}>
+                  {profile?.portfolioUrl ? (
+                    <Pressable onPress={() => openLink(profile.portfolioUrl!)} style={[styles.profileLink, { borderColor: colors.cardBorder }]} accessibilityRole="link" accessibilityLabel="Portfolio">
+                      <Ionicons name="globe-outline" size={16} color={colors.cyan} />
+                      <Text style={[styles.profileLinkText, { color: colors.text }]}>Portfolio</Text>
+                      <Ionicons name="arrow-up-outline" size={12} color={colors.muted} style={{ transform: [{ rotate: '45deg' }] }} />
+                    </Pressable>
+                  ) : null}
+                  {profile?.linkedinUrl ? (
+                    <Pressable onPress={() => openLink(profile.linkedinUrl!)} style={[styles.profileLink, { borderColor: colors.cardBorder }]} accessibilityRole="link" accessibilityLabel="LinkedIn">
+                      <Ionicons name="logo-linkedin" size={16} color={colors.cyan} />
+                      <Text style={[styles.profileLinkText, { color: colors.text }]}>LinkedIn</Text>
+                      <Ionicons name="arrow-up-outline" size={12} color={colors.muted} style={{ transform: [{ rotate: '45deg' }] }} />
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </CyberCutBox>
+          </View>
         ) : (
           /* EDIT PROFILE FORM */
           <View style={styles.editFormWrap}>
@@ -606,15 +644,7 @@ export function ProfileScreen() {
         {/* 4. INTERESTS SECTION */}
         {!editing && profile?.interests && profile.interests.length > 0 ? (
           <View style={styles.interestsSection}>
-            <View style={styles.sectionHeaderWrap}>
-              <Text style={[styles.sectionTitleText, { color: colors.text }]}>Interests</Text>
-              <LinearGradient
-                colors={['#00E5FF', '#D83CFF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.accentLine}
-              />
-            </View>
+            <SectionLabel text="INTERESTS" />
 
             <View style={styles.interestsRow}>
               {profile.interests.map((interest) => (
@@ -657,62 +687,50 @@ export function ProfileScreen() {
 
         {/* Quick Links for Own Profile */}
         {isOwn && (
-          <View style={styles.quickLinksGroup}>
-            <Pressable onPress={() => nav.navigate('MyPosts')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="chatbubbles-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Posts</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('Tabs', { screen: 'CommunitiesTab' })} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="people-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Communities</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('MyTeamRequests')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="people-circle-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Team Requests</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('MyEvents')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="megaphone-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Events</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('MyDemos')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="game-controller-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Demos</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('MyBookings')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="calendar-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>My Bookings</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('MyEventApplications')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="receipt-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>Payment Applications</Text>
-            </Pressable>
-
-            <Pressable onPress={() => nav.navigate('BecomeExpert')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-              <Ionicons name="ribbon-outline" size={17} color={colors.primary} />
-              <Text style={[styles.linkText, { color: colors.primary }]}>
-                {isExpert
-                  ? 'Expert Profile'
-                  : myApplication?.rejection_reason
-                  ? 'Expert Application (not approved)'
-                  : myApplication
-                  ? 'Expert Application (pending review)'
-                  : 'Become an Expert'}
-              </Text>
-            </Pressable>
-
-            {isExpert && (
-              <Pressable onPress={() => nav.navigate('ExpertAvailability')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
-                <Ionicons name="time-outline" size={17} color={colors.primary} />
-                <Text style={[styles.linkText, { color: colors.primary }]}>Manage Availability</Text>
-              </Pressable>
-            )}
-          </View>
+          <ProfileMenu
+            sections={[
+              {
+                title: 'ACTIVITY',
+                items: [
+                  { key: 'posts', icon: 'chatbubbles-outline', title: 'My Posts', subtitle: 'What you’ve shared with the feed', onPress: () => nav.navigate('MyPosts') },
+                  { key: 'communities', icon: 'people-outline', title: 'My Communities', subtitle: 'Guilds you’ve joined or created', onPress: () => nav.navigate('Tabs', { screen: 'CommunitiesTab' }) },
+                  { key: 'team', icon: 'people-circle-outline', title: 'My Team Requests', subtitle: 'Roles you’re hiring for and applicants', onPress: () => nav.navigate('MyTeamRequests') },
+                  { key: 'events', icon: 'megaphone-outline', title: 'My Events', subtitle: 'Events you host or attend', onPress: () => nav.navigate('MyEvents') },
+                  { key: 'demos', icon: 'game-controller-outline', title: 'My Demos', subtitle: 'Builds you’ve uploaded', onPress: () => nav.navigate('MyDemos') },
+                ],
+              },
+              {
+                title: 'SESSIONS & PAYMENTS',
+                items: [
+                  { key: 'bookings', icon: 'calendar-outline', title: 'My Bookings', subtitle: 'Expert sessions, past and upcoming', onPress: () => nav.navigate('MyBookings') },
+                  { key: 'payments', icon: 'receipt-outline', title: 'Payment Applications', subtitle: 'Ticket payments and their status', onPress: () => nav.navigate('MyEventApplications') },
+                ],
+              },
+              {
+                title: 'EXPERT',
+                items: [
+                  {
+                    key: 'expert',
+                    icon: 'ribbon-outline',
+                    premium: isExpert,
+                    title: isExpert ? 'Expert Profile' : myApplication ? 'Expert Application' : 'Become an Expert',
+                    subtitle: isExpert
+                      ? 'Your live profile in the directory'
+                      : myApplication?.rejection_reason
+                        ? 'Not approved — edit and resubmit'
+                        : myApplication
+                          ? 'In review by the Reapers team'
+                          : 'Offer 15-minute sessions and earn the gold badge',
+                    tag: isExpert ? 'VERIFIED' : myApplication?.rejection_reason ? 'NOT APPROVED' : myApplication ? 'PENDING' : undefined,
+                    onPress: () => nav.navigate('BecomeExpert'),
+                  },
+                  ...(isExpert
+                    ? [{ key: 'availability', icon: 'time-outline' as const, title: 'Manage Availability', subtitle: 'Choose when people can book you', onPress: () => nav.navigate('ExpertAvailability') }]
+                    : []),
+                ],
+              },
+            ]}
+          />
         )}
 
         {/* Portfolio Demos */}
@@ -754,7 +772,27 @@ export function ProfileScreen() {
   );
 }
 
+function SectionLabel({ text }: { text: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.sectionLabelRow}>
+      <Text style={[styles.sectionLabelText, { color: colors.muted }]}>{text}</Text>
+      <View style={[styles.sectionLabelRule, { backgroundColor: colors.cardBorder }]} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  sectionLabelText: { fontFamily: fonts.mono, fontSize: 11, letterSpacing: 2 },
+  sectionLabelRule: { flex: 1, height: StyleSheet.hairlineWidth },
+  halo: { position: 'absolute', alignSelf: 'center', borderRadius: 999 },
+  haloOuter: { width: 150, height: 150, top: -30 },
+  haloInner: { width: 116, height: 116, top: -13 },
+  metaIcon: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  profileLinksRow: { flexDirection: 'row', gap: 10 },
+  profileLink: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 11, borderRadius: 8, borderWidth: 1, backgroundColor: 'rgba(255, 255, 255, 0.04)' },
+  profileLinkText: { fontFamily: fonts.bodySemi, fontSize: 13 },
   container: {
     flex: 1,
     backgroundColor: '#090F1C',
@@ -818,7 +856,7 @@ const styles = StyleSheet.create({
   },
   identitySection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   avatarWrap: {
     position: 'relative',
@@ -909,25 +947,25 @@ const styles = StyleSheet.create({
   },
   statTileCut: {
     flex: 1,
-    height: 60,
+    height: 84,
   },
   statTileInner: {
     width: '100%',
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 2,
+    gap: 3,
   },
   statNumText: {
     fontFamily: fonts.display,
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   statLabelText: {
     fontFamily: fonts.mono,
-    fontSize: 8.5,
-    letterSpacing: 0.6,
+    fontSize: 9,
+    letterSpacing: 1.2,
     color: '#8E9BB5',
   },
   aboutCardBox: {
@@ -1018,7 +1056,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   interestPillText: {
     fontFamily: fonts.monoBold,
@@ -1033,26 +1071,6 @@ const styles = StyleSheet.create({
   },
   msgBtnTouch: {
     height: 42,
-  },
-  quickLinksGroup: {
-    gap: 8,
-    marginBottom: 20,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: 'rgba(14, 20, 35, 0.75)',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  linkText: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 13.5,
-    color: '#00E5FF',
   },
   portfolioSection: {
     marginBottom: 24,
