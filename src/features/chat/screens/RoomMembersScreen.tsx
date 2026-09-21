@@ -3,6 +3,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { AvatarRing } from '../../../components/avatars/AvatarRing';
 import { BladeCard } from '../../../components/cards/BladeCard';
@@ -55,11 +56,16 @@ export function RoomMembersScreen() {
   const [invitableLoading, setInvitableLoading] = useState(false);
   const [invitableHasMore, setInvitableHasMore] = useState(false);
   const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
+  const [invitingIds, setInvitingIds] = useState<Set<string>>(new Set());
   const [inviteErr, setInviteErr] = useState('');
 
   useEffect(() => {
     fetchMembers(params.roomId);
   }, [params.roomId, fetchMembers]);
+
+  const refreshControl = useRefreshControl(async () => {
+    await fetchMembers(params.roomId);
+  });
 
   const isAdmin = room?.myRole === 'owner' || room?.myRole === 'admin';
   const memberIds = useMemo(() => members.map((m) => m.userId), [members]);
@@ -112,12 +118,20 @@ export function RoomMembersScreen() {
   };
 
   const invite = async (inviteeId: string) => {
-    if (!user) return;
+    if (!user || invitingIds.has(inviteeId)) return;
+    setInvitingIds((prev) => new Set(prev).add(inviteeId));
+    setInviteErr('');
     try {
       await inviteToRoom(params.roomId, user.id, inviteeId);
       setInvitedIds((prev) => new Set(prev).add(inviteeId));
     } catch (e) {
       setInviteErr(e instanceof Error ? e.message : 'Could not send invite');
+    } finally {
+      setInvitingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(inviteeId);
+        return next;
+      });
     }
   };
 
@@ -151,7 +165,7 @@ export function RoomMembersScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title="Members" onBack={() => nav.goBack()} />
       <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 13, marginBottom: 12 }}>
         {members.length} member{members.length === 1 ? '' : 's'}
@@ -247,6 +261,8 @@ export function RoomMembersScreen() {
                   </Text>
                   {invitedIds.has(p.id) ? (
                     <Text style={{ color: colors.online, fontFamily: fonts.bodyMed, fontSize: 13 }}>Invited</Text>
+                  ) : invitingIds.has(p.id) ? (
+                    <Text style={{ color: colors.muted, fontFamily: fonts.bodyMed, fontSize: 13 }}>Inviting…</Text>
                   ) : (
                     <Pressable onPress={() => invite(p.id)} accessibilityRole="button">
                       <Text style={{ color: colors.electricAccent, fontFamily: fonts.bodySemi, fontSize: 13 }}>Invite</Text>

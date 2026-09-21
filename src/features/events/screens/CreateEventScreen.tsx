@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import {
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { errorMessage } from '../../../utils/errorMessage';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +18,8 @@ import * as Location from 'expo-location';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { CyberTextField } from '../../../components/cyber/CyberTextField';
-import { EventDateTimePicker } from '../../../components/inputs/EventDateTimePicker';
+import { EventSchedulePicker } from '../../../components/inputs/EventSchedulePicker';
+import { getEventVenue } from '../../../services/supabase/events';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { useAuth } from '../../../hooks/useAuth';
 import { useEventStore } from '../../../store/eventStore';
@@ -25,12 +27,15 @@ import { uploadImage } from '../../../services/supabase/storage';
 import type { MainStackParamList } from '../../../navigation/types';
 import { fonts, useTheme } from '../../../theme';
 import type { EventCategory, EventType } from '../../../types/event';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 type DraftAccount = { bankName: string; accountTitle: string; accountNumber: string; iban: string };
 const EMPTY_ACCOUNT: DraftAccount = { bankName: '', accountTitle: '', accountNumber: '', iban: '' };
 
-const EVENT_TYPES: EventType[] = ['Online', 'Physical'];
-const EVENT_CATEGORIES: EventCategory[] = ['Esports', 'Meetup', 'LAN', 'Workshop', 'Tournament', 'Watch party'];
+const EVENT_TYPES: EventType[] = ['Online', 'Physical', 'Hybrid'];
+// Physical is shown as "Onsite" to match the Online / Onsite / Hybrid wording used in filters.
+const EVENT_TYPE_LABEL: Record<EventType, string> = { Online: 'ONLINE', Physical: 'ONSITE', Hybrid: 'HYBRID' };
+const EVENT_CATEGORIES: EventCategory[] = ['Esports', 'Meetup', 'Tournament'];
 
 export function CreateEventScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -43,13 +48,48 @@ export function CreateEventScreen() {
   const editingEvent = useEventStore((s) => s.events.find((e) => e.id === params?.eventId));
   const isEditing = !!params?.eventId;
 
+  const removeCustomCategory = (c: string) => {
+    setCustomCategories((prev) => prev.filter((x) => x !== c));
+    if (selectedCategory === c) setSelectedCategory('Meetup');
+  };
+
+  // Long-press a custom chip to rename it: it moves into the input, ready to retype and re-add.
+  const editCustomCategory = (c: string) => {
+    removeCustomCategory(c);
+    setCustomCategory(c);
+  };
+
+  const addCustomCategory = () => {
+    const c = customCategory.trim().replace(/\s+/g, ' ');
+    if (!c) return;
+    const existing = [...EVENT_CATEGORIES, ...customCategories].find((x) => x.toLowerCase() === c.toLowerCase());
+    if (existing) {
+      setSelectedCategory(existing);
+    } else {
+      setCustomCategories((prev) => [...prev, c]);
+      setSelectedCategory(c);
+    }
+    setCustomCategory('');
+  };
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState('');
-  const [price, setPrice] = useState('0');
+  const [venue, setVenue] = useState('');
+  // Ticket plans: one row = one plan people can pick when booking. All prices 0 (the default) means a free event.
+  const [plans, setPlans] = useState<{ name: string; price: string }[]>([{ name: 'Standard ticket', price: '0' }]);
   const [maxAttendees, setMaxAttendees] = useState('');
+  // Registration closes N hours/days before the start; stored as minutes. Blank/0 = when it starts.
+  const [closeAmount, setCloseAmount] = useState('');
+  const [closeUnit, setCloseUnit] = useState<'hours' | 'days'>('hours');
+  const closeMinRaw = Math.round((Number(closeAmount) || 0) * (closeUnit === 'days' ? 1440 : 60));
+  const MAX_CLOSE_MIN = 14 * 1440;
+  const closeTooLong = closeMinRaw > MAX_CLOSE_MIN;
+  const closeMin = Math.min(closeMinRaw, MAX_CLOSE_MIN);
   const [selectedType, setSelectedType] = useState<EventType>('Online');
   const [selectedCategory, setSelectedCategory] = useState<EventCategory>('Meetup');
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [customCategory, setCustomCategory] = useState('');
   const [cover, setCover] = useState<string | undefined>();
   const [coverChanged, setCoverChanged] = useState(false);
   const [payoutContactNote, setPayoutContactNote] = useState('');
@@ -59,6 +99,12 @@ export function CreateEventScreen() {
     d.setMinutes(0, 0, 0);
     return d;
   });
+  const [endsAt, setEndsAt] = useState<Date>(() => {
+    const d = new Date(Date.now() + 86400000 * 3);
+    d.setMinutes(0, 0, 0);
+    return new Date(d.getTime() + 2 * 3600000);
+  });
+  const [scheduleErr, setScheduleErr] = useState('');
   const [err, setErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState('');
@@ -69,9 +115,43 @@ export function CreateEventScreen() {
     setDescription(editingEvent.description);
     setLocation(editingEvent.location);
     setMaxAttendees(editingEvent.maxAttendees ? String(editingEvent.maxAttendees) : '');
+    {
+      const m = editingEvent.registrationClosesBeforeMin ?? 0;
+      if (m === 0) {
+        setCloseAmount('');
+      } else if (m % 1440 === 0) {
+        setCloseUnit('days');
+        setCloseAmount(String(m / 1440));
+      } else {
+        setCloseUnit('hours');
+        setCloseAmount(String(Math.round((m / 60) * 100) / 100));
+      }
+    }
     setCover(editingEvent.cover);
-    setStartsAt(new Date(editingEvent.startsAt));
+    setSelectedType(editingEvent.type);
+    const s = new Date(editingEvent.startsAt);
+    setStartsAt(s);
+    // Events created before end times existed have none — default to the old 3h assumption.
+    setEndsAt(editingEvent.endsAt ? new Date(editingEvent.endsAt) : new Date(s.getTime() + 3 * 3600000));
+    getEventVenue(editingEvent.id).then((v) => setVenue(v ?? '')).catch(() => undefined);
   }, [editingEvent]);
+
+  const validateSchedule = (): boolean => {
+    if (endsAt.getTime() <= startsAt.getTime()) {
+      setScheduleErr('End time must be after the start time.');
+      return false;
+    }
+    if (closeTooLong) {
+      setSubmitErr('Registration can close at most 14 days before the event.');
+      return false;
+    }
+    if (closeMin > 0 && startsAt.getTime() - closeMin * 60000 <= Date.now()) {
+      setSubmitErr('That closing time has already passed — choose a shorter time before the event, or 0.');
+      return false;
+    }
+    setScheduleErr('');
+    return true;
+  };
 
   const pickCoverImage = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
@@ -90,6 +170,7 @@ export function CreateEventScreen() {
       setSubmitErr('Please pick a date and time in the future.');
       return;
     }
+    if (!validateSchedule()) return;
     setSubmitting(true);
     setSubmitErr('');
     try {
@@ -98,14 +179,17 @@ export function CreateEventScreen() {
       await updateEvent(editingEvent.id, {
         title: title.trim(),
         description: description.trim() || 'Community event',
-        location: location.trim() || (selectedType === 'Online' ? 'Online' : 'TBA'),
+        location: selectedType === 'Online' ? 'Online' : location.trim() || 'TBA',
+        venue: venue.trim() || null,
         startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
         maxAttendees: maxAttendeesNum,
+        registrationClosesBeforeMin: closeMin,
         ...(coverUrl ? { coverUrl } : {}),
       });
       nav.replace('EventDetail', { id: editingEvent.id });
     } catch (e) {
-      setSubmitErr(e instanceof Error ? e.message : 'Could not save changes');
+      setSubmitErr(errorMessage(e, 'Could not save changes'));
     } finally {
       setSubmitting(false);
     }
@@ -117,7 +201,7 @@ export function CreateEventScreen() {
   // the event at or near the venue). Best-effort: permission denial or failure never blocks
   // publishing the event, it just leaves lat/lng unset (excluded from distance filtering).
   const captureEventCoords = async (): Promise<{ lat?: number; lng?: number }> => {
-    if (selectedType !== 'Physical') return {};
+    if (selectedType === 'Online') return {};
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return {};
@@ -138,7 +222,25 @@ export function CreateEventScreen() {
       setSubmitErr('Please pick a date and time in the future.');
       return;
     }
-    const amount = Number(price) || 0;
+    if (!validateSchedule()) return;
+    // Ticket plans -> free event (every price 0) or paid (every plan needs a name and a price > 0).
+    const parsedPlans = plans.map((p) => ({ name: p.name.trim(), price: Number(p.price) || 0 }));
+    const isPaid = parsedPlans.some((p) => p.price > 0);
+    if (isPaid) {
+      if (parsedPlans.some((p) => p.price <= 0)) {
+        setSubmitErr('Every ticket plan needs a price above 0 — remove the free plan or set its price.');
+        return;
+      }
+      if (parsedPlans.some((p) => !p.name)) {
+        setSubmitErr('Give every ticket plan a name.');
+        return;
+      }
+      if (new Set(parsedPlans.map((p) => p.name.toLowerCase())).size !== parsedPlans.length) {
+        setSubmitErr('Ticket plan names must be different from each other.');
+        return;
+      }
+    }
+    const amount = isPaid ? Math.min(...parsedPlans.map((p) => p.price)) : 0;
     const validAccounts = accounts
       .filter((a) => a.bankName.trim() && a.accountTitle.trim() && a.accountNumber.trim())
       .map((a) => ({
@@ -166,20 +268,24 @@ export function CreateEventScreen() {
         type: selectedType,
         category: selectedCategory,
         startsAt: startsAt.toISOString(),
-        location: location.trim() || (selectedType === 'Online' ? 'Online' : 'TBA'),
+        endsAt: endsAt.toISOString(),
+        location: selectedType === 'Online' ? 'Online' : location.trim() || 'TBA',
+        venue: venue.trim() || undefined,
         lat: coords.lat,
         lng: coords.lng,
         coverUrl,
         maxAttendees: maxAttendeesNum,
-        paid: amount > 0,
+        registrationClosesBeforeMin: closeMin,
+        paid: isPaid,
         price: amount,
+        ticketPlans: isPaid ? parsedPlans : undefined,
         currency: 'PKR',
         payoutContactNote: payoutContactNote.trim() || undefined,
         payoutAccounts: validAccounts.length ? validAccounts : undefined,
       });
       nav.replace('EventDetail', { id: event.id });
     } catch (e) {
-      setSubmitErr(e instanceof Error ? e.message : 'Could not create event');
+      setSubmitErr(errorMessage(e, 'Could not create event'));
     } finally {
       setSubmitting(false);
     }
@@ -207,7 +313,8 @@ export function CreateEventScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
       >
@@ -239,15 +346,24 @@ export function CreateEventScreen() {
         <CyberTextField
           label="TITLE"
           required
-          placeholder="e.g. Niagara Falls Community Meetup"
+          placeholder="e.g. Karachi Indie Devs Meetup"
           value={title}
           onChangeText={setTitle}
           error={err}
           onBlur={() => setErr(title.trim().length < 3 ? 'Title is required (minimum 3 characters)' : '')}
         />
 
-        {/* 3. DATE & TIME PICKER */}
-        <EventDateTimePicker value={startsAt} onChange={setStartsAt} />
+        {/* 3. START / END DATE & TIME */}
+        <EventSchedulePicker
+          start={startsAt}
+          end={endsAt}
+          onChange={(s, e) => {
+            setStartsAt(s);
+            setEndsAt(e);
+            setScheduleErr('');
+          }}
+          error={scheduleErr}
+        />
 
         {/* 4. DESCRIPTION */}
         <CyberTextField
@@ -260,34 +376,45 @@ export function CreateEventScreen() {
           containerStyle={{ marginBottom: 16 }}
         />
 
-        {/* 5. LOCATION OR LINK */}
-        <CyberTextField
-          label="LOCATION OR LINK"
-          placeholder="e.g. Canada / Online Discord channel"
-          value={location}
-          onChangeText={setLocation}
-        />
-
-        {/* 6. TICKET PRICE — fixed at creation, not editable afterward */}
-        {!isEditing && (
-          <CyberTextField
-            label="TICKET PRICE (PKR, 0 = FREE)"
-            placeholder="0"
-            value={price}
-            onChangeText={setPrice}
-            keyboardType="decimal-pad"
-            hint="Above 0, attendees pay into your bank account(s) below and submit proof for your approval."
-          />
-        )}
-
-        {/* 7. MAX ATTENDEES */}
-        <CyberTextField
-          label="MAX ATTENDEES (OPTIONAL)"
-          placeholder="Unlimited"
-          value={maxAttendees}
-          onChangeText={setMaxAttendees}
-          keyboardType="number-pad"
-        />
+        {/* REGISTRATION CLOSURE — type a number and pick hours or days before the start */}
+        <View style={styles.pickerSection}>
+          <Text style={[styles.pickerLabel, { color: colors.muted }]}>REGISTRATION CLOSES</Text>
+          <View style={styles.closeRow}>
+            <View style={[styles.closeInputWrap, { backgroundColor: colors.inputFill, borderColor: closeTooLong ? '#FF4D6D' : colors.inputBorder }]}>
+              <TextInput
+                value={closeAmount}
+                onChangeText={(v) => setCloseAmount(v.replace(/[^0-9.]/g, '').slice(0, 5))}
+                placeholder="0"
+                placeholderTextColor={colors.muted2}
+                keyboardType="decimal-pad"
+                accessibilityLabel="Registration closes, amount before the event starts"
+                style={[styles.closeInput, { color: colors.text }]}
+              />
+            </View>
+            {(['hours', 'days'] as const).map((u) => {
+              const active = closeUnit === u;
+              return (
+                <Pressable
+                  key={u}
+                  onPress={() => setCloseUnit(u)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={[styles.typeChip, active ? styles.typeChipActive : [styles.chipInactive, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]]}
+                >
+                  <Text style={[styles.chipText, { color: colors.muted }, active && styles.chipTextActive]}>{u.toUpperCase()}</Text>
+                </Pressable>
+              );
+            })}
+            <Text style={[styles.closeSuffix, { color: colors.muted }]}>before</Text>
+          </View>
+          <Text style={[styles.planHint, { color: closeTooLong ? '#FF4D6D' : colors.muted2, marginTop: 8, marginBottom: 0 }]}>
+            {closeTooLong
+              ? 'Registration can close at most 14 days before the event.'
+              : closeMin === 0
+              ? 'Leave at 0 (or empty) to let people join right up until the event starts.'
+              : `Sign-ups stop ${closeAmount} ${closeUnit} before the start — ${new Date(startsAt.getTime() - closeMin * 60000).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.`}
+          </Text>
+        </View>
 
         {/* 8. EVENT FORMAT (ONLINE / PHYSICAL) — fixed at creation, not editable afterward */}
         {!isEditing && (
@@ -304,7 +431,7 @@ export function CreateEventScreen() {
                     style={[styles.typeChip, active ? styles.typeChipActive : [styles.chipInactive, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]]}
                   >
                     <Text style={[styles.chipText, { color: colors.muted }, active && styles.chipTextActive]}>
-                      {t.toUpperCase()}
+                      {EVENT_TYPE_LABEL[t]}
                     </Text>
                   </Pressable>
                 );
@@ -313,26 +440,144 @@ export function CreateEventScreen() {
           </View>
         )}
 
+        {/* 5. WHERE — the area is public; the exact venue (or join link) is only revealed to
+            people with a confirmed RSVP (event_venues, 0067). */}
+        {selectedType !== 'Online' ? (
+          <>
+            <CyberTextField
+              label="NEARBY TOWN OR AREA"
+              placeholder="e.g. Gulberg, DHA, Clifton, Bahria"
+              value={location}
+              onChangeText={setLocation}
+              hint="Shown to everyone before they RSVP."
+            />
+            <CyberTextField
+              label={selectedType === 'Hybrid' ? 'EXACT VENUE + JOIN LINK' : 'EXACT VENUE'}
+              placeholder={selectedType === 'Hybrid' ? 'e.g. Brewci Cafe, Gulberg · discord.gg/xyz' : 'e.g. Brewci Cafe, Gulberg'}
+              value={venue}
+              onChangeText={setVenue}
+              multiline
+              hint="Only revealed after RSVP confirmation."
+            />
+          </>
+        ) : (
+          <CyberTextField
+            label="JOIN LINK OR PLATFORM"
+            placeholder="e.g. Discord invite / Zoom link"
+            value={venue}
+            onChangeText={setVenue}
+            autoCapitalize="none"
+            hint="Only revealed after RSVP confirmation."
+          />
+        )}
+
+        {/* 6. TICKET PLANS — fixed at creation, not editable afterward (people may already hold tickets) */}
+        {!isEditing && (
+          <View style={styles.pickerSection}>
+            <Text style={[styles.pickerLabel, { color: colors.muted }]}>TICKET PLANS (PKR)</Text>
+            <Text style={[styles.planHint, { color: colors.muted2 }]}>
+              Leave the price at 0 for a free event. Add more plans (e.g. Standard, VIP) and people choose one when booking, then how many tickets.
+            </Text>
+            {plans.map((p, i) => (
+              <View key={i} style={styles.planRow}>
+                <View style={{ flex: 1.4 }}>
+                  <CyberTextField
+                    label={i === 0 ? 'PLAN NAME' : `PLAN ${i + 1}`}
+                    placeholder="e.g. Standard ticket"
+                    value={p.name}
+                    onChangeText={(v) => setPlans((prev) => prev.map((x, j) => (j === i ? { ...x, name: v.slice(0, 60) } : x)))}
+                    containerStyle={{ marginBottom: 0 }}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <CyberTextField
+                    label="PRICE"
+                    placeholder="0"
+                    value={p.price}
+                    onChangeText={(v) => setPlans((prev) => prev.map((x, j) => (j === i ? { ...x, price: v.replace(/[^0-9.]/g, '') } : x)))}
+                    keyboardType="decimal-pad"
+                    containerStyle={{ marginBottom: 0 }}
+                  />
+                </View>
+                {plans.length > 1 ? (
+                  <Pressable onPress={() => setPlans((prev) => prev.filter((_, j) => j !== i))} hitSlop={8} style={styles.planRemove} accessibilityRole="button" accessibilityLabel={`Remove plan ${i + 1}`}>
+                    <Ionicons name="close-circle" size={22} color="#FF4D6D" />
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+            {plans.length < 6 ? (
+              <Pressable onPress={() => setPlans((prev) => [...prev, { name: '', price: '' }])} style={styles.addPlanBtn} accessibilityRole="button">
+                <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                <Text style={[styles.addPlanText, { color: colors.primary }]}>Add another plan</Text>
+              </Pressable>
+            ) : null}
+            {plans.some((p) => (Number(p.price) || 0) > 0) ? (
+              <Text style={[styles.planHint, { color: colors.muted2 }]}>
+                Paid: attendees pay into your bank account(s) below and submit proof for your approval. A buyer can take up to 10 tickets per order.
+              </Text>
+            ) : null}
+          </View>
+        )}
+
+        {/* 7. MAX ATTENDEES */}
+        <CyberTextField
+          label="MAX ATTENDEES (OPTIONAL)"
+          placeholder="Unlimited"
+          value={maxAttendees}
+          onChangeText={setMaxAttendees}
+          keyboardType="number-pad"
+        />
+
         {/* 9. EVENT CATEGORY — fixed at creation, not editable afterward */}
         {!isEditing && (
           <View style={styles.pickerSection}>
             <Text style={[styles.pickerLabel, { color: colors.muted }]}>CATEGORY</Text>
             <View style={styles.chipRow}>
-              {EVENT_CATEGORIES.map((c) => {
+              {[...EVENT_CATEGORIES, ...customCategories].map((c) => {
                 const active = selectedCategory === c;
+                const isCustom = customCategories.includes(c);
                 return (
                   <Pressable
                     key={c}
                     onPress={() => setSelectedCategory(c)}
+                    onLongPress={isCustom ? () => editCustomCategory(c) : undefined}
                     accessibilityRole="button"
-                    style={[styles.categoryChip, active ? styles.categoryChipActive : [styles.chipInactive, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]]}
+                    accessibilityHint={isCustom ? 'Long press to rename' : undefined}
+                    style={[styles.categoryChip, active ? styles.categoryChipActive : [styles.chipInactive, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }], isCustom && styles.customChipRow]}
                   >
                     <Text style={[styles.chipText, { color: colors.muted }, active && styles.chipTextActive]}>
                       {c.toUpperCase()}
                     </Text>
+                    {isCustom ? (
+                      <Pressable onPress={() => removeCustomCategory(c)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Remove ${c}`}>
+                        <Ionicons name="close-circle" size={16} color={active ? '#FFFFFF' : colors.muted} />
+                      </Pressable>
+                    ) : null}
                   </Pressable>
                 );
               })}
+            </View>
+            {customCategories.length > 0 ? (
+              <Text style={[styles.customHint, { color: colors.muted2 }]}>Tap ✕ to remove your category · long-press it to rename</Text>
+            ) : null}
+            {/* Own category — the presets are a starting point, not the only options. */}
+            <View style={styles.customCategoryRow}>
+              <View style={[styles.customCategoryInputWrap, { backgroundColor: colors.inputFill, borderColor: colors.inputBorder }]}>
+                <TextInput
+                  value={customCategory}
+                  onChangeText={setCustomCategory}
+                  placeholder="Add your own category"
+                  placeholderTextColor={colors.muted2}
+                  maxLength={24}
+                  autoCorrect={false}
+                  onSubmitEditing={addCustomCategory}
+                  style={[styles.customCategoryInput, { color: colors.text }]}
+                />
+              </View>
+              <Pressable onPress={addCustomCategory} accessibilityRole="button" accessibilityLabel="Add category" style={styles.customCategoryAdd}>
+                <Text style={styles.customCategoryAddText}>ADD</Text>
+              </Pressable>
             </View>
           </View>
         )}
@@ -342,9 +587,6 @@ export function CreateEventScreen() {
         <View style={styles.payoutSection}>
           <View style={styles.sectionHeaderWrap}>
             <Text style={[styles.sectionHeaderTitle, { color: colors.primary }]}>WHERE ATTENDEES SHOULD PAY YOU</Text>
-            <Text style={[styles.sectionHeaderHint, { color: colors.muted }]}>
-              Reapers never processes payments directly — attendees transfer directly to your bank account and submit proof for you to review.
-            </Text>
           </View>
 
           {accounts.map((acc, idx) => (
@@ -381,7 +623,7 @@ export function CreateEventScreen() {
                 />
                 <CyberTextField
                   label="ACCOUNT TITLE"
-                  placeholder="e.g. John Doe"
+                  placeholder="e.g. Ahmed Raza"
                   value={acc.accountTitle}
                   onChangeText={(v) =>
                     setAccounts((prev) => prev.map((a, i) => (i === idx ? { ...a, accountTitle: v } : a)))
@@ -445,7 +687,7 @@ export function CreateEventScreen() {
             </View>
           </CyberCutBox>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
@@ -550,6 +792,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 229, 255, 0.2)',
     borderColor: '#00E5FF',
   },
+  customChipRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  customHint: { fontFamily: fonts.body, fontSize: 11.5, marginTop: 8 },
+  customCategoryRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  customCategoryInputWrap: { flex: 1, height: 44, borderRadius: 8, borderWidth: 1, justifyContent: 'center' },
+  customCategoryInput: { fontFamily: fonts.body, fontSize: 13, paddingHorizontal: 12, paddingVertical: 0 },
+  customCategoryAdd: { height: 44, paddingHorizontal: 18, borderRadius: 8, backgroundColor: '#7928CA', alignItems: 'center', justifyContent: 'center' },
+  customCategoryAddText: { fontFamily: fonts.monoBold, fontSize: 11, letterSpacing: 0.8, color: '#FFFFFF' },
+  closeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  closeInputWrap: { width: 84, height: 44, borderRadius: 10, borderWidth: 1, justifyContent: 'center' },
+  closeInput: { fontFamily: fonts.display, fontSize: 18, fontWeight: '700', textAlign: 'center', paddingVertical: 0 },
+  closeSuffix: { fontFamily: fonts.body, fontSize: 14, marginLeft: 2 },
+  planHint: { fontFamily: fonts.body, fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  planRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginBottom: 12 },
+  planRemove: { height: 44, justifyContent: 'center' },
+  addPlanBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, marginBottom: 6 },
+  addPlanText: { fontFamily: fonts.bodySemi, fontSize: 14 },
   categoryChip: {
     paddingHorizontal: 14,
     height: 36,

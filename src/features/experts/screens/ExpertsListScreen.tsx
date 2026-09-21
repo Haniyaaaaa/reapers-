@@ -1,7 +1,7 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -16,9 +16,13 @@ import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
 import { EXPERTISE_TAGS } from '../../../types/expert';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchExperts } from '../../../services/supabase/experts';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useExpertStore } from '../../../store/expertStore';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const FILTERS = ['All', ...EXPERTISE_TAGS] as const;
 
@@ -67,13 +71,26 @@ export function ExpertsListScreen() {
   const hasMore = isRecommended ? recommendedHasMore : expertsHasMore;
   const loadMore = () => (isRecommended ? loadMoreRecommended(user?.skills ?? [], user?.id) : loadMoreExperts());
 
+  // Search asks the server so it covers every expert, not just the pages loaded so far (with the
+  // active specialty chip applied); the loaded list is filtered locally until the answer arrives.
+  const dq = useDebouncedValue(searchQuery);
+  const specialty = !isRecommended && filter !== 'All' ? filter : undefined;
+  const search = useServerSearch(dq, (n) => searchExperts(n, { specialty, excludeUserId: user?.id }), { deps: [specialty, user?.id] });
+  const searchActive = search.needle.length > 0;
+  const loadSessionCounts = useExpertStore((s) => s.loadSessionCounts);
+
+  useEffect(() => {
+    if (search.results?.length) loadSessionCounts(search.results.map((e) => e.id));
+  }, [search.results, loadSessionCounts]);
+
   const filteredList = useMemo(() => {
-    if (!searchQuery.trim()) return list;
-    const q = searchQuery.toLowerCase().trim();
+    if (search.results) return search.results;
+    if (!searchActive) return list;
+    const q = search.needle;
     return list.filter(
       (e) => e.name.toLowerCase().includes(q) || e.role.toLowerCase().includes(q) || e.company.toLowerCase().includes(q) || e.specialties.some((s) => s.toLowerCase().includes(q)),
     );
-  }, [list, searchQuery]);
+  }, [list, search.results, search.needle, searchActive]);
 
   return (
     <Screen refreshControl={refreshControl}>
@@ -97,7 +114,7 @@ export function ExpertsListScreen() {
       </View>
 
       {!isRecommended ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+        <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
           {FILTERS.map((item) => {
             const active = filter === item;
             return (
@@ -116,7 +133,7 @@ export function ExpertsListScreen() {
               </Pressable>
             );
           })}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       ) : null}
 
       {loading ? (
@@ -128,13 +145,13 @@ export function ExpertsListScreen() {
 
       {!loading && error ? <RetryBanner message={`Could not load. ${error}`} onRetry={() => (isRecommended ? fetchRecommended(user?.skills ?? [], user?.id) : fetchExperts(filter === 'All' ? undefined : filter, user?.id))} /> : null}
 
-      {!loading && !error && filteredList.length === 0 ? <EmptyState title="No experts found." /> : null}
+      {!loading && !error && filteredList.length === 0 && !search.searching ? <EmptyState title={searchActive ? 'No experts match your search.' : 'No experts found.'} /> : null}
 
       {!loading && !error
         ? filteredList.map((e) => <ExpertListCard key={e.id} expert={e} sessionCount={sessionCounts[e.id]} onPress={() => nav.navigate('ExpertProfile', { id: e.id })} />)
         : null}
 
-      {!loading && !error ? <LoadMoreButton hasMore={hasMore} onPress={loadMore} /> : null}
+      {!loading && !error && !searchActive ? <LoadMoreButton hasMore={hasMore} onPress={loadMore} /> : null}
     </Screen>
   );
 }

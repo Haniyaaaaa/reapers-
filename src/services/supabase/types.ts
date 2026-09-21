@@ -7,11 +7,12 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type UserRole = 'gamer' | 'developer' | 'expert';
 export type ChatroomKind = 'room' | 'dm' | 'server' | 'global';
-export type MessageKind = 'text' | 'gif' | 'voice' | 'image' | 'video';
-export type EventType = 'Online' | 'Physical';
+export type MessageKind = 'text' | 'gif' | 'voice' | 'image' | 'video' | 'sticker';
+export type EventType = 'Online' | 'Physical' | 'Hybrid';
 export type RsvpStatus = 'going' | 'interested' | 'not_going';
 export type ReportTarget = 'message' | 'room' | 'demo' | 'event' | 'user' | 'post' | 'post_comment';
 export type PostKind = 'text' | 'photo' | 'activity';
+export type TeamWorkMode = 'onsite' | 'remote' | 'hybrid';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type BillingInterval = 'monthly' | 'yearly' | '30_days';
 export type SubscriptionStatus = 'active' | 'cancelled' | 'expired';
@@ -131,6 +132,10 @@ export type Database = {
           is_jam_entry: boolean;
           play_count: number;
           screenshot_urls: string[];
+          tags: string[];
+          platforms: string[];
+          portfolio_url: string | null;
+          press_kit_url: string | null;
           created_at: string;
         };
         Insert: {
@@ -144,6 +149,10 @@ export type Database = {
           external_url?: string | null;
           is_jam_entry?: boolean;
           screenshot_urls?: string[];
+          tags?: string[];
+          platforms?: string[];
+          portfolio_url?: string | null;
+          press_kit_url?: string | null;
         };
         Update: {
           title?: string;
@@ -155,6 +164,10 @@ export type Database = {
           external_url?: string | null;
           is_jam_entry?: boolean;
           screenshot_urls?: string[];
+          tags?: string[];
+          platforms?: string[];
+          portfolio_url?: string | null;
+          press_kit_url?: string | null;
         };
         Relationships: [];
       };
@@ -276,6 +289,7 @@ export type Database = {
           location: string | null;
           member_count: number;
           created_by: string | null;
+          tags: string[];
           created_at: string;
         };
         Insert: {
@@ -285,6 +299,7 @@ export type Database = {
           logo_url?: string | null;
           location?: string | null;
           created_by: string;
+          tags?: string[];
         };
         Update: {
           short_name?: string;
@@ -292,6 +307,7 @@ export type Database = {
           description?: string;
           logo_url?: string | null;
           location?: string | null;
+          tags?: string[];
         };
         Relationships: [];
       };
@@ -316,6 +332,7 @@ export type Database = {
           member_count: number;
           created_by: string | null;
           created_at: string;
+          last_message_at: string;
         };
         Insert: {
           name: string;
@@ -454,6 +471,8 @@ export type Database = {
           type: EventType;
           category: string | null;
           starts_at: string;
+          ends_at: string | null;
+          registration_closes_before_minutes: number;
           location: string;
           cover_url: string | null;
           attendee_count: number;
@@ -473,6 +492,8 @@ export type Database = {
           type: EventType;
           category?: string | null;
           starts_at: string;
+          ends_at?: string | null;
+          registration_closes_before_minutes?: number;
           location?: string;
           cover_url?: string | null;
           max_attendees?: number | null;
@@ -489,6 +510,8 @@ export type Database = {
           type?: EventType;
           category?: string | null;
           starts_at?: string;
+          ends_at?: string | null;
+          registration_closes_before_minutes?: number;
           location?: string;
           cover_url?: string | null;
           max_attendees?: number | null;
@@ -607,10 +630,46 @@ export type Database = {
           project: string;
           excerpt: string;
           roles: string[];
+          studio: string | null;
+          team_size: number | null;
+          stage: TeamStage | null;
+          engine: string | null;
+          location: string | null;
+          hours_per_week: number | null;
+          compensation: TeamCompensation | null;
+          needed_by: string | null;
+          work_mode: TeamWorkMode | null;
           created_at: string;
         };
-        Insert: { poster_id: string; project: string; excerpt?: string; roles?: string[] };
-        Update: { project?: string; excerpt?: string; roles?: string[] };
+        Insert: {
+          poster_id: string;
+          project: string;
+          excerpt?: string;
+          roles?: string[];
+          studio?: string | null;
+          team_size?: number | null;
+          stage?: TeamStage | null;
+          engine?: string | null;
+          location?: string | null;
+          hours_per_week?: number | null;
+          compensation?: TeamCompensation | null;
+          needed_by?: string | null;
+          work_mode?: TeamWorkMode | null;
+        };
+        Update: {
+          project?: string;
+          excerpt?: string;
+          roles?: string[];
+          studio?: string | null;
+          team_size?: number | null;
+          stage?: TeamStage | null;
+          engine?: string | null;
+          location?: string | null;
+          hours_per_week?: number | null;
+          compensation?: TeamCompensation | null;
+          needed_by?: string | null;
+          work_mode?: TeamWorkMode | null;
+        };
         Relationships: [];
       };
       team_request_applications: {
@@ -806,6 +865,12 @@ export type Database = {
         };
         Relationships: [];
       };
+      event_venues: {
+        Row: { event_id: string; venue: string };
+        Insert: { event_id: string; venue: string };
+        Update: { venue?: string };
+        Relationships: [];
+      };
       payment_webhook_events: {
         Row: {
           id: string;
@@ -848,6 +913,7 @@ export type Database = {
           user_id: string;
           status: RsvpStatus;
           paid_by_user: boolean;
+          ticket_count: number;
           created_at: string;
           updated_at: string;
         };
@@ -884,6 +950,12 @@ export type Database = {
         Update: Record<string, never>;
         Relationships: [];
       };
+      event_ticket_plans: {
+        Row: { id: string; event_id: string; name: string; price: number; sort_order: number; created_at: string };
+        Insert: { event_id: string; name: string; price: number; sort_order?: number };
+        Update: { name?: string; price?: number; sort_order?: number };
+        Relationships: [];
+      };
       event_payment_applications: {
         Row: {
           id: string;
@@ -896,6 +968,11 @@ export type Database = {
           reservation_code: string | null;
           created_at: string;
           reviewed_at: string | null;
+          ticket_plan_id: string | null;
+          plan_name: string | null;
+          unit_price: number | null;
+          quantity: number;
+          total_amount: number | null;
         };
         Insert: {
           event_id: string;
@@ -903,10 +980,14 @@ export type Database = {
           payout_account_id?: string | null;
           proof_screenshot_path: string;
           status?: EventApplicationStatus;
+          ticket_plan_id?: string | null;
+          quantity?: number;
         };
         Update: {
           payout_account_id?: string | null;
           proof_screenshot_path?: string;
+          ticket_plan_id?: string | null;
+          quantity?: number;
           status?: EventApplicationStatus;
           rejection_reason?: string | null;
         };
@@ -929,7 +1010,7 @@ export type Database = {
       };
       list_connected_people: {
         Args: { viewer_id: string; search: string | null; limit_count: number; offset_count: number; exclude_ids: string[] };
-        Returns: { id: string; display_name: string; roles: string[]; skills: string[] }[];
+        Returns: { id: string; display_name: string; roles: string[]; skills: string[]; avatar_uri: string | null; avatar_id: string | null }[];
       };
       admin_get_user_email: {
         Args: { target_id: string };
@@ -986,6 +1067,7 @@ export type EventUpdate = Database['public']['Tables']['events']['Update'];
 export type EventRsvpRow = Database['public']['Tables']['event_rsvps']['Row'];
 
 export type EventPayoutAccountRow = Database['public']['Tables']['event_payout_accounts']['Row'];
+export type EventTicketPlanRow = Database['public']['Tables']['event_ticket_plans']['Row'];
 export type EventPaymentApplicationRow = Database['public']['Tables']['event_payment_applications']['Row'];
 
 export type ExpertRow = Database['public']['Tables']['experts']['Row'];
@@ -997,6 +1079,9 @@ export type ExpertReviewRow = Database['public']['Tables']['expert_reviews']['Ro
 export type BookingInsert = Database['public']['Tables']['bookings']['Insert'];
 
 export type ConnectionRow = Database['public']['Tables']['connections']['Row'];
+
+export type TeamStage = 'idea' | 'prototype' | 'vertical_slice' | 'production' | 'live';
+export type TeamCompensation = 'paid' | 'revenue_share' | 'unpaid';
 
 export type TeamRequestRow = Database['public']['Tables']['team_requests']['Row'];
 export type TeamRequestInsert = Database['public']['Tables']['team_requests']['Insert'];

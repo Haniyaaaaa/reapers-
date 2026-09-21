@@ -2,6 +2,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
@@ -34,6 +35,10 @@ export function SupportTicketDetailScreen() {
     fetchMessages(params.id);
   }, [params.id, fetchTicket, fetchMessages]);
 
+  const refreshControl = useRefreshControl(async () => {
+    await Promise.all([fetchTicket(params.id), fetchMessages(params.id)]);
+  });
+
   const send = async () => {
     if (!reply.trim() || !user) return;
     setSending(true);
@@ -49,7 +54,7 @@ export function SupportTicketDetailScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title={ticket?.subject ?? 'Ticket'} onBack={() => nav.goBack()} />
       {ticket ? <Text style={[styles.status, { color: colors.muted }]}>{STATUS_LABEL[ticket.status]}</Text> : null}
 

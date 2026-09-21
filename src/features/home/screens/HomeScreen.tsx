@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   Image,
+  ImageSourcePropType,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   RefreshControl,
-  ScrollView,
   Share,
   StatusBar,
   StyleSheet,
@@ -13,7 +15,6 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
 import { CompositeNavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,15 +28,17 @@ import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
 import { CyberFilterModal, type FilterState } from '../../../components/cyber/CyberFilterModal';
 import { CyberEventCard } from '../../../components/cards/CyberEventCard';
+import { AutoCarousel } from '../../../components/layout/AutoCarousel';
 import { CyberCommunityCard } from '../../../components/cards/CyberCommunityCard';
 import { CyberDemoCard } from '../../../components/cards/CyberDemoCard';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
 import { CyberDeveloperCard } from '../../../components/cards/CyberDeveloperCard';
 import { CyberFeedPostCard } from '../../../components/cards/CyberFeedPostCard';
 import { PostCommentsSheet } from '../../../components/feed/PostCommentsSheet';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { CyberTeamOppCard } from '../../../components/cards/CyberTeamOppCard';
 import { CyberExpertBookCard } from '../../../components/cards/CyberExpertBookCard';
-import { DEFAULT_AVATAR_ID, getCyberAvatarById, getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { DEFAULT_AVATAR_ID, getCyberAvatarById, getCyberAvatarSource, resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCommunitiesStore } from '../../../store/communitiesStore';
 import { useDemoStore } from '../../../store/demoStore';
@@ -45,8 +48,20 @@ import { useNetworkStore } from '../../../store/networkStore';
 import { useExpertStore } from '../../../store/expertStore';
 import { useChatStore } from '../../../store/chatStore';
 import { usePostsStore } from '../../../store/postsStore';
+import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
+import { formatEventBadge } from '../../../utils/eventBadge';
+import { STALE_MS } from '../../../store/swr';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchCommunities } from '../../../services/supabase/communities';
+import { searchEvents } from '../../../services/supabase/events';
+import { searchExperts } from '../../../services/supabase/experts';
+import { searchPeople, searchTeamRequests } from '../../../services/supabase/network';
+import { listDemos } from '../../../services/supabase/demos';
+import { HeaderGreeting } from '../components/HeaderGreeting';
 import { navigateToNotificationTarget } from '../../../navigation/notificationTarget';
-import { personMatchScore } from '../../../utils/matching';
+import { personMatchScore, teamMatchScore } from '../../../utils/matching';
+import { formatCommitment } from '../../../utils/teamRequest';
 import { matchesEventFilters } from '../../../utils/eventFilters';
 import { subscribeToNewPosts } from '../../../services/supabase/realtime';
 import { uploadPostImage } from '../../../services/supabase/storage';
@@ -54,8 +69,16 @@ import { submitReport } from '../../../services/supabase/reports';
 import type { MainStackParamList, TabParamList } from '../../../navigation/types';
 import type { NotificationItem } from '../../../types/extra';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Home search cost controls: each section only needs a handful of rows (its own screen has the rest),
+// and sections further down the page only search once the user scrolls toward them.
+const HOME_SEARCH_LIMIT = 10;
+const HOME_SEARCH_MIN_CHARS = 2;
+const REACH_MID_Y = SCREEN_HEIGHT * 0.35; // demos + people come into view
+const REACH_FAR_Y = SCREEN_HEIGHT * 1.2; // team requests + experts come into view
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 32, 430);
 
 const TOPIC_CHIPS = ['FOR YOU', 'UNITY', 'NETCODE', 'INDIE', 'HIRING'];
@@ -90,45 +113,18 @@ function formatEventDate(isoStr: string) {
   }
 }
 
-function formatEventBadge(isoStr: string) {
-  try {
-    const d = new Date(isoStr);
-    const diffHours = Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60));
-    if (diffHours <= 0) return 'LIVE NOW';
-    if (diffHours <= 48) return `LIVE IN ${Math.max(1, Math.ceil(diffHours / 24))} DAYS`;
-    return `STARTS ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}`;
-  } catch {
-    return 'SCHEDULED';
-  }
-}
-
 export function HomeScreen() {
   const { colors, light, gradients } = useTheme();
   const nav = useNavigation<Nav>();
 
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
 
   const [refreshing, setRefreshing] = useState(false);
   const [activeChip, setActiveChip] = useState('FOR YOU');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<FilterState | null>(null);
-  const [viewerCoords, setViewerCoords] = useState<{ lat: number; lng: number } | undefined>();
-
-  useEffect(() => {
-    if (advancedFilters?.location !== 'WITHIN 50KM' || viewerCoords) return;
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
-        const pos = await Location.getCurrentPositionAsync({});
-        setViewerCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      } catch {
-        // Best-effort — falls back to matchesEventFilters' pass-through when coords are unset.
-      }
-    })();
-  }, [advancedFilters, viewerCoords]);
 
   // Live stores
   const demos = useDemoStore((s) => s.demos);
@@ -177,19 +173,25 @@ export function HomeScreen() {
   const unreadNotesCount = notes.filter((n) => !n.read).length;
   const unreadChatCount = rooms.reduce((sum, r) => sum + (r.unread || 0), 0);
 
-  const currentAvatar = getCyberAvatarById(user?.avatarId || DEFAULT_AVATAR_ID);
+  const presetAvatar = getCyberAvatarById(user?.avatarId || DEFAULT_AVATAR_ID);
+  // A custom uploaded photo takes priority over the preset avatar, same as the Profile screen.
+  const currentAvatar = { ...presetAvatar, source: user?.avatarUri ? { uri: user.avatarUri } : presetAvatar.source };
 
+  // Keyed on the stable user id (not the `user` object) and gated by freshness: coming back to
+  // Home within STALE_MS reuses what's already loaded instead of refetching everything.
+  const userId = user?.id;
   useEffect(() => {
-    fetchDemos();
-    fetchExperts();
-    if (user) {
-      fetchCommunities(user.id);
-      fetchEvents(user.id);
-      fetchPeople(user.id);
-      fetchTeams(user.id);
-      fetchRooms(user.id);
-      fetchNotifications(user.id);
-      fetchFeed(user.id);
+    const fresh = { ifStaleMs: STALE_MS };
+    fetchDemos(undefined, fresh);
+    fetchExperts(undefined, undefined, fresh);
+    if (userId) {
+      fetchCommunities(userId, fresh);
+      fetchEvents(userId, fresh);
+      fetchPeople(userId, fresh);
+      fetchTeams(userId, undefined, fresh);
+      fetchRooms(userId, fresh);
+      fetchNotifications(userId, fresh);
+      fetchFeed(userId, fresh);
     }
   }, [
     fetchDemos,
@@ -201,7 +203,7 @@ export function HomeScreen() {
     fetchRooms,
     fetchNotifications,
     fetchFeed,
-    user,
+    userId,
   ]);
 
   // Feed-wide, one subscription for this screen — flags the "New posts" banner rather than
@@ -214,11 +216,15 @@ export function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (user) {
-        fetchNotifications(user.id);
-        fetchRooms(user.id);
+      if (userId) {
+        const fresh = { ifStaleMs: STALE_MS };
+        fetchNotifications(userId, fresh);
+        fetchRooms(userId, fresh);
+        refreshUser({ ifStaleMs: 60_000 });
+        fetchEvents(userId, fresh);
+        fetchCommunities(userId, fresh);
       }
-    }, [user, fetchNotifications, fetchRooms])
+    }, [userId, fetchNotifications, fetchRooms, refreshUser, fetchEvents, fetchCommunities])
   );
 
   useEffect(() => {
@@ -237,7 +243,9 @@ export function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([
+    try {
+      await Promise.all([
+      refreshUser(),
       fetchDemos(),
       fetchExperts(),
       user ? fetchCommunities(user.id) : Promise.resolve(),
@@ -247,70 +255,162 @@ export function HomeScreen() {
       user ? fetchRooms(user.id) : Promise.resolve(),
       user ? fetchNotifications(user.id) : Promise.resolve(),
       user ? fetchFeed(user.id) : Promise.resolve(),
-      new Promise((r) => setTimeout(r, 600)),
     ]);
-    setRefreshing(false);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  // Dynamic header timestamp and greeting
-  const now = new Date();
-  const headerTimestamp = useMemo(() => {
-    const day = now.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
-    const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    return `${day} · ${time}`;
-  }, []);
-
-  const headerGreeting = useMemo(() => {
-    const period = now.getHours() < 12 ? 'Morning' : now.getHours() < 18 ? 'Afternoon' : 'Evening';
-    const name = user?.displayName?.split(' ')[0] || user?.username || 'Reaper';
-    return `${period}, ${name}`;
-  }, [user]);
+  const greetingName = user?.displayName?.split(' ')[0] || user?.username || 'Reaper';
 
   // Filtering for topic chips and search query
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const normalizedChip = activeChip === 'FOR YOU' ? '' : activeChip.toLowerCase();
 
+  // Global search: every section asks the server (so it finds matches beyond the first page each
+  // list has loaded). Until a section's answer arrives it filters what's loaded, so typing never
+  // feels laggy. The topic chip still narrows whichever list is showing.
+  const debouncedQuery = useDebouncedValue(searchQuery, 500);
+  const uid = user?.id ?? '';
+  // How far down the page the user has scrolled (0 = top, 1 = past the first sections, 2 = far).
+  // It only ever goes up, so it changes state at most twice — not on every scroll frame.
+  const [reach, setReach] = useState(0);
+  const onHomeScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const next = y > REACH_FAR_Y ? 2 : y > REACH_MID_Y ? 1 : 0;
+    setReach((r) => (next > r ? next : r));
+  }, []);
+  const search = { minChars: HOME_SEARCH_MIN_CHARS };
+  // Events + communities are on screen when Home opens; the others wait until they're near.
+  const sEvents = useServerSearch(debouncedQuery, (n) => searchEvents(uid, n, HOME_SEARCH_LIMIT), { ...search, enabled: !!uid, cacheKey: `home-events:${uid}` });
+  const sCommunities = useServerSearch(debouncedQuery, (n) => searchCommunities(uid, n, HOME_SEARCH_LIMIT), { ...search, enabled: !!uid, cacheKey: `home-communities:${uid}` });
+  const sDemos = useServerSearch(debouncedQuery, async (n) => (await listDemos(0, HOME_SEARCH_LIMIT, { search: n })).rows, { ...search, enabled: reach >= 1, cacheKey: 'home-demos' });
+  const sPeople = useServerSearch(debouncedQuery, (n) => searchPeople(uid, n, HOME_SEARCH_LIMIT), { ...search, enabled: !!uid && reach >= 1, cacheKey: `home-people:${uid}` });
+  const sTeams = useServerSearch(debouncedQuery, (n) => searchTeamRequests(n, {}, HOME_SEARCH_LIMIT), { ...search, enabled: reach >= 2, cacheKey: 'home-teams' });
+  const sExperts = useServerSearch(debouncedQuery, (n) => searchExperts(n, { excludeUserId: uid }, HOME_SEARCH_LIMIT), { ...search, enabled: reach >= 2, deps: [uid], cacheKey: `home-experts:${uid}` });
+
+  // `serverMatched` = the server already applied the search text, so only the chip is checked here.
   const matchesFilter = useCallback(
-    (texts: (string | undefined | null)[]) => {
+    (texts: (string | undefined | null)[], serverMatched = false) => {
       const combined = texts.filter(Boolean).join(' ').toLowerCase();
       if (normalizedChip && !combined.includes(normalizedChip)) return false;
-      if (normalizedQuery && !combined.includes(normalizedQuery)) return false;
+      if (!serverMatched && normalizedQuery && !combined.includes(normalizedQuery)) return false;
       return true;
     },
     [normalizedChip, normalizedQuery]
   );
 
   const filteredCommunities = useMemo(() => {
-    return communities.filter((c) => matchesFilter([c.name, c.description]));
-  }, [communities, matchesFilter]);
+    const ready = sCommunities.results !== null;
+    return (sCommunities.results ?? communities).filter((c) => matchesFilter([c.name, c.description, ...(c.tags ?? [])], ready));
+  }, [communities, sCommunities.results, matchesFilter]);
 
   const filteredDemos = useMemo(() => {
-    return demos.filter((d) => matchesFilter([d.title, d.genre, d.description, d.developerName]));
-  }, [demos, matchesFilter]);
+    const ready = sDemos.results !== null;
+    return (sDemos.results ?? demos).filter((d) => matchesFilter([d.title, d.genre, d.description, d.developerName], ready));
+  }, [demos, sDemos.results, matchesFilter]);
 
   const filteredPeople = useMemo(() => {
-    return people.filter(
+    const ready = sPeople.results !== null;
+    return (sPeople.results ?? people).filter(
       (p) =>
         p.id !== user?.id &&
-        matchesFilter([p.displayName, ...(p.skills || []), ...(p.roles || [])])
+        matchesFilter([p.displayName, ...(p.skills || []), ...(p.roles || [])], ready)
     );
-  }, [people, user?.id, matchesFilter]);
+  }, [people, sPeople.results, user?.id, matchesFilter]);
 
   const filteredTeams = useMemo(() => {
-    return teams.filter((t) => matchesFilter([t.project, t.excerpt, ...(t.roles || [])]));
-  }, [teams, matchesFilter]);
+    const ready = sTeams.results !== null;
+    return (sTeams.results ?? teams).filter((t) => matchesFilter([t.project, t.excerpt, t.studio, t.engine, ...(t.roles || [])], ready));
+  }, [teams, sTeams.results, matchesFilter]);
 
   const filteredExperts = useMemo(() => {
-    return experts.filter((e) => matchesFilter([e.name, e.role, e.company, ...(e.specialties || [])]));
-  }, [experts, matchesFilter]);
+    const ready = sExperts.results !== null;
+    return (sExperts.results ?? experts).filter((e) => matchesFilter([e.name, e.role, e.company, ...(e.specialties || [])], ready));
+  }, [experts, sExperts.results, matchesFilter]);
 
   const upcomingEvents = useMemo(() => {
-    return events
+    const ready = sEvents.results !== null;
+    return (sEvents.results ?? events)
+      .filter((e) => matchesFilter([e.title, e.description, e.location, e.category], ready))
       .filter((e) => new Date(e.startsAt).getTime() >= Date.now() - 3600000)
-      .filter((e) => !advancedFilters || matchesEventFilters(e, advancedFilters, viewerCoords))
+      .filter((e) => !advancedFilters || matchesEventFilters(e, advancedFilters))
       .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-  }, [events, advancedFilters, viewerCoords]);
+  }, [events, sEvents.results, matchesFilter, advancedFilters]);
   const featuredEvent = upcomingEvents[0];
+
+  // "Recent Activities" is discovery, not the notification inbox (that lives behind the bell):
+  // one round-robin mix of events, communities, rooms, demos and experts so the slider shows
+  // a bit of everything instead of six of the same kind.
+  const recentItems = useMemo(() => {
+    type RecentItem = { key: string; kindLabel: string; icon: React.ComponentProps<typeof Ionicons>['name']; title: string; subtitle: string; image?: ImageSourcePropType; onPress: () => void };
+    const groups: RecentItem[][] = [
+      upcomingEvents.map((e) => ({
+        key: `event-${e.id}`,
+        kindLabel: 'EVENT',
+        icon: 'calendar-outline' as const,
+        title: e.title,
+        subtitle: formatEventDate(e.startsAt),
+        image: e.cover ? { uri: e.cover } : undefined,
+        onPress: () => nav.navigate('EventDetail', { id: e.id }),
+      })),
+      filteredCommunities.map((c) => ({
+        key: `community-${c.id}`,
+        kindLabel: 'COMMUNITY',
+        icon: 'people-outline' as const,
+        title: c.name,
+        subtitle: `${c.memberCount} MEMBERS`,
+        image: c.logoUrl ? { uri: c.logoUrl } : c.logo,
+        onPress: () => nav.navigate('CommunityDetail', { id: c.id }),
+      })),
+      rooms
+        .filter((r) => r.kind !== 'dm')
+        .filter((r) => !normalizedQuery || r.name.toLowerCase().includes(normalizedQuery) || r.description.toLowerCase().includes(normalizedQuery))
+        .map((r) => ({
+          key: `room-${r.id}`,
+          kindLabel: 'ROOM',
+          icon: 'chatbubbles-outline' as const,
+          title: r.name,
+          subtitle: `${r.memberCount} MEMBERS`,
+          image: r.avatar ? { uri: r.avatar } : r.logo,
+          onPress: () => nav.navigate('ChatDetail', { id: r.id }),
+        })),
+      [...filteredDemos]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .map((d) => ({
+          key: `demo-${d.id}`,
+          kindLabel: 'DEMO',
+          icon: 'game-controller-outline' as const,
+          title: d.title,
+          subtitle: `${d.genre.toUpperCase()} · ${formatRelativeTime(d.createdAt)} AGO`,
+          image: d.thumbnail ? { uri: d.thumbnail } : undefined,
+          onPress: () => nav.navigate('DemoDetail', { id: d.id }),
+        })),
+      filteredExperts.map((x) => ({
+        key: `expert-${x.id}`,
+        kindLabel: 'EXPERT',
+        icon: 'shield-checkmark-outline' as const,
+        title: x.name,
+        subtitle: [x.role, x.company].filter(Boolean).join(' · '),
+        image: resolveAvatarSource(x.avatar, x.avatarId),
+        onPress: () => nav.navigate('ExpertProfile', { id: x.id }),
+      })),
+    ];
+    const mixed: RecentItem[] = [];
+    for (let round = 0; mixed.length < 6 && groups.some((g) => round < g.length); round++) {
+      for (const g of groups) if (round < g.length && mixed.length < 6) mixed.push(g[round]);
+    }
+    return mixed;
+  }, [upcomingEvents, filteredCommunities, rooms, filteredDemos, filteredExperts, normalizedQuery, nav]);
+
+  const anySearching = sCommunities.searching || sEvents.searching || sExperts.searching || sPeople.searching || sTeams.searching || sDemos.searching;
+  const nothingMatches =
+    normalizedQuery.length > 0 &&
+    // Below-the-fold sections aren't searched until scrolled near, so only claim "nothing" once
+    // every section has had its chance (or the query is too short to search the server at all).
+    (reach >= 2 || normalizedQuery.length < HOME_SEARCH_MIN_CHARS) &&
+    !anySearching &&
+    upcomingEvents.length + filteredCommunities.length + filteredDemos.length + filteredPeople.length + filteredTeams.length + filteredExperts.length === 0;
 
   // Section Header Component with Cyber Glow Accent Line
   const renderSectionHeader = (title: string, onSeeAll?: () => void) => (
@@ -375,12 +475,15 @@ export function HomeScreen() {
       {/* Cyberpunk Artwork Background with ground reflections */}
       <CyberBackground />
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + 10, paddingBottom: 120 },
         ]}
         showsVerticalScrollIndicator={false}
+        onScroll={onHomeScroll}
+        scrollEventThrottle={100}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -400,46 +503,15 @@ export function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Open profile"
               >
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill="rgba(45, 30, 75, 0.85)"
-                  borderColor="rgba(216, 60, 255, 0.5)"
-                  borderWidth={1.5}
-                  style={styles.headerAvatarCutBox}
-                >
-                  <Image source={currentAvatar.source} style={styles.headerAvatarImg} />
-                </CyberCutBox>
+                <CutAvatar source={currentAvatar.source} size={64} cut={16} />
                 <View style={styles.onlineStatusDot} />
               </Pressable>
 
-              <View style={styles.greetingWrap}>
-                <Text style={[styles.timestampText, { color: colors.muted }]} numberOfLines={1}>{headerTimestamp}</Text>
-                <Text style={[styles.greetingText, { color: colors.text }]}>{headerGreeting}</Text>
-              </View>
+              <HeaderGreeting name={greetingName} />
             </View>
 
-            {/* Right Quick Actions: Network + Chat + Notifications + Settings */}
+            {/* Right Quick Actions: Chat + Notifications + Settings */}
             <View style={styles.actionsGroup}>
-              {/* Network Button */}
-              <Pressable
-                onPress={() => nav.navigate('Network')}
-                style={styles.actionIconBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Open network"
-              >
-                <CyberCutBox
-                  cutSize={6}
-                  radius={4}
-                  fill={colors.cardFill}
-                  borderColor={colors.cardBorder}
-                  borderWidth={1}
-                  style={styles.actionIconCutBox}
-                >
-                  <Ionicons name="people-outline" size={18} color={colors.electricAccent} />
-                </CyberCutBox>
-              </Pressable>
-
               {/* Chat Button with live unread counter */}
               <Pressable
                 onPress={() => nav.navigate('ChatDirectory')}
@@ -557,7 +629,8 @@ export function HomeScreen() {
           </View>
 
           {/* ================= 3. TOPIC FILTER PILLS ================= */}
-          <ScrollView
+          <KeyboardAwareScrollView
+            keyboardShouldPersistTaps="handled"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}
@@ -592,41 +665,41 @@ export function HomeScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </KeyboardAwareScrollView>
+
+          {nothingMatches ? (
+            <Text style={[styles.searchNoResults, { color: colors.muted }]}>No results for “{searchQuery.trim()}”. Try a different word.</Text>
+          ) : anySearching ? (
+            <Text style={[styles.searchNoResults, { color: colors.muted }]}>Searching everything…</Text>
+          ) : null}
 
           {/* ================= 4. UPCOMING EVENT ================= */}
           {renderSectionHeader('Upcoming Event', () => nav.navigate('EventsTab'))}
           {featuredEvent ? (
-            <>
-              <CyberEventCard
-                id={featuredEvent.id}
-                title={featuredEvent.title}
-                dateStr={formatEventDate(featuredEvent.startsAt)}
-                badge={formatEventBadge(featuredEvent.startsAt)}
-                tags={[
-                  featuredEvent.category || featuredEvent.type.toUpperCase(),
-                  featuredEvent.paid ? `${featuredEvent.currency || 'PKR'} ${featuredEvent.price}` : 'FREE',
-                ]}
-                membersCount={`${featuredEvent.attendeeCount || 0} MEMBERS`}
-                imageUri={featuredEvent.cover}
-                onPress={() => nav.navigate('EventDetail', { id: featuredEvent.id })}
-              />
-
-              {upcomingEvents.length > 1 && (
-                <View style={styles.carouselPaginationRow}>
-                  {upcomingEvents.slice(0, 4).map((e, idx) => (
-                    <View
-                      key={e.id}
-                      style={[styles.pagPill, idx === 0 && styles.pagPillActive]}
-                    />
-                  ))}
-                </View>
+            <AutoCarousel
+              items={upcomingEvents.slice(0, 4)}
+              keyExtractor={(e) => e.id}
+              showDots
+              renderItem={(e) => (
+                <CyberEventCard
+                  id={e.id}
+                  title={e.title}
+                  dateStr={formatEventDate(e.startsAt)}
+                  badge={formatEventBadge(e.startsAt, e.endsAt)}
+                  tags={[
+                    e.category || e.type.toUpperCase(),
+                    e.paid ? `${e.currency || 'PKR'} ${e.price}` : 'FREE',
+                  ]}
+                  membersCount={`${e.attendeeCount || 0} MEMBERS`}
+                  imageUri={e.cover}
+                  onPress={() => nav.navigate('EventDetail', { id: e.id })}
+                />
               )}
-            </>
+            />
           ) : (
             renderEmptySection(
               'No upcoming events scheduled',
-              'Host a launch watch party, dev jam, or tech showcase with your guild.',
+              'Host a meetup, dev jam, or tech showcase with your guild.',
               'Host an Event',
               () => nav.navigate('CreateEvent')
             )
@@ -635,7 +708,8 @@ export function HomeScreen() {
           {/* ================= 5. FEATURED COMMUNITIES ================= */}
           {renderSectionHeader('Featured communities', () => nav.navigate('CommunitiesTab'))}
           {filteredCommunities.length > 0 ? (
-            <ScrollView
+            <KeyboardAwareScrollView
+              keyboardShouldPersistTaps="handled"
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScrollRow}
@@ -657,7 +731,7 @@ export function HomeScreen() {
                   onPress={() => nav.navigate('CommunityDetail', { id: c.id })}
                 />
               ))}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           ) : (
             renderEmptySection(
               'No communities found',
@@ -670,7 +744,8 @@ export function HomeScreen() {
           {/* ================= 6. TRENDING DEMOS ================= */}
           {renderSectionHeader('Trending Demos', () => nav.navigate('DemosTab'))}
           {filteredDemos.length > 0 ? (
-            <ScrollView
+            <KeyboardAwareScrollView
+              keyboardShouldPersistTaps="handled"
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScrollRow}
@@ -693,7 +768,7 @@ export function HomeScreen() {
                   />
                 );
               })}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           ) : (
             renderEmptySection(
               'No demos found',
@@ -706,7 +781,8 @@ export function HomeScreen() {
           {/* ================= 7. DEVELOPERS NEAR YOUR STACK ================= */}
           {renderSectionHeader('Developers near your stack', () => nav.navigate('Network'))}
           {filteredPeople.length > 0 ? (
-            <ScrollView
+            <KeyboardAwareScrollView
+              keyboardShouldPersistTaps="handled"
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScrollRow}
@@ -728,7 +804,8 @@ export function HomeScreen() {
                       'Game Creator'
                     }
                     matchScore={`${matchPct}%`}
-                    avatarSource={getCyberAvatarSource('female_10')}
+                    avatarUri={dev.avatarUri}
+                    avatarSource={getCyberAvatarSource(dev.avatarId)}
                     status={dev.connect}
                     onConnect={async () => {
                       if (!user || dev.connect !== 'connect') return;
@@ -738,7 +815,7 @@ export function HomeScreen() {
                   />
                 );
               })}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           ) : (
             renderEmptySection(
               'No developers found',
@@ -812,16 +889,18 @@ export function HomeScreen() {
                   key={team.id}
                   id={team.id}
                   title={team.project}
-                  matchScore="95%"
-                  tags={team.roles?.length ? team.roles : ['CREW', 'DEVELOPER']}
-                  description={team.excerpt || 'Looking for collaborators on new project.'}
-                  hoursRev="OPEN ROLE"
+                  matchScore={`${teamMatchScore({ skills: user?.skills ?? [], roles: user?.roles ?? [] }, team)}%`}
+                  tags={team.roles ?? []}
+                  description={team.excerpt || undefined}
+                  hoursRev={formatCommitment(team)}
+                  avatarSource={resolveAvatarSource(team.posterAvatarUri, team.posterAvatarId)}
                   requested={isApplied}
                   onRequestToJoin={async () => {
                     if (!user) return;
                     await applyTeam(user.id, team.id);
                   }}
                   onPress={() => nav.navigate('Network')}
+                  onHeaderPress={() => useProfilePreviewStore.getState().open(team.posterId)}
                 />
               );
             })
@@ -843,10 +922,11 @@ export function HomeScreen() {
                 id={exp.id}
                 name={exp.name}
                 title={`${exp.role}${exp.company ? ' · ' + exp.company : ''}`}
-                rating={exp.rating || 5.0}
-                reviewsCount={18}
+                rating={exp.rating}
+                reviewsCount={exp.reviewCount}
                 availableSlot={exp.nextSlot || 'AVAILABLE'}
                 avatarUri={exp.avatar}
+                verified={exp.verified}
                 avatarSource={exp.avatarId ? getCyberAvatarSource(exp.avatarId) : undefined}
                 onBook={() => nav.navigate('ExpertProfile', { id: exp.id })}
                 onPress={() => nav.navigate('ExpertProfile', { id: exp.id })}
@@ -863,72 +943,53 @@ export function HomeScreen() {
 
           {/* ================= 11. RECENT ACTIVITIES ================= */}
           {renderSectionHeader('Recent Activities')}
-          {notes.length > 0 ? (
+          {recentItems.length > 0 ? (
             <View style={styles.recentActivitiesWrap}>
-              {notes.slice(0, 5).map((note) => (
-                <CyberCutBox
-                  key={note.id}
-                  cutSize={10}
-                  radius={5}
-                  fill={light ? colors.cardFill : "rgba(14, 20, 35, 0.85)"}
-                  borderColor={light ? colors.cardBorder : undefined}
-                  style={styles.activityItemCard}
-                >
-                  <Pressable
-                    onPress={() => {
-                      if (note.target) navigateToNotificationTarget(nav, note.target);
-                      else nav.navigate('Notifications');
-                    }}
-                    style={styles.activityInner}
+              <AutoCarousel
+                items={recentItems}
+                keyExtractor={(it) => it.key}
+                showDots
+                renderItem={(it) => (
+                  <CyberCutBox
+                    cutSize={10}
+                    radius={5}
+                    fill={light ? colors.cardFill : 'rgba(14, 20, 35, 0.85)'}
+                    borderColor={light ? colors.cardBorder : undefined}
+                    style={styles.activityItemCard}
                   >
-                    <View style={styles.activityAvatarBox}>
-                      <Ionicons
-                        name={
-                          note.target && 'screen' in note.target
-                            ? note.target.screen === 'EventDetail' || note.target.screen === 'EventHub'
-                              ? 'calendar-outline'
-                              : note.target.screen === 'ChatDetail' || note.target.screen === 'RoomInvites'
-                              ? 'chatbubble-ellipses-outline'
-                              : note.target.screen === 'Network' ||
-                                note.target.screen === 'TeamRequestApplicants' ||
-                                note.target.screen === 'CommunityDetail'
-                              ? 'people-outline'
-                              : note.target.screen === 'DemoDetail'
-                              ? 'game-controller-outline'
-                              : 'notifications-outline'
-                            : 'notifications-outline'
-                        }
-                        size={18}
-                        color="#00E5FF"
-                      />
-                    </View>
-                    <View style={styles.activityTextWrap}>
-                      <Text style={[styles.activityText, { color: colors.text }]} numberOfLines={1}>
-                        {note.title}
-                      </Text>
-                      {note.body ? (
-                        <Text style={[styles.activitySubText, { color: colors.muted }]} numberOfLines={1}>
-                          {note.body}
+                    <Pressable onPress={it.onPress} style={styles.activityInner} accessibilityRole="button">
+                      <View style={styles.activityThumbBox}>
+                        {it.image ? (
+                          <Image source={it.image} style={styles.activityAvatarImg} resizeMode="cover" />
+                        ) : (
+                          <Ionicons name={it.icon} size={22} color="#00E5FF" />
+                        )}
+                      </View>
+                      <View style={styles.activityTextWrap}>
+                        <Text style={styles.activityKind}>{it.kindLabel}</Text>
+                        <Text style={[styles.activityText, { color: colors.text }]} numberOfLines={1}>
+                          {it.title}
                         </Text>
-                      ) : null}
-                    </View>
-                    <View style={styles.activityMetaRow}>
-                      <Text style={[styles.activityTimeText, { color: colors.muted2 }]}>
-                        {formatRelativeTime(note.createdAt)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                </CyberCutBox>
-              ))}
+                        {it.subtitle ? (
+                          <Text style={[styles.activitySubText, { color: colors.muted }]} numberOfLines={1}>
+                            {it.subtitle}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={colors.muted2} />
+                    </Pressable>
+                  </CyberCutBox>
+                )}
+              />
             </View>
           ) : (
             renderEmptySection(
-              'No recent activity',
-              'Event updates, connection requests, and system alerts will appear here.'
+              'Nothing to explore yet',
+              'New events, communities, rooms, demos and experts will show up here.'
             )
           )}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <CyberFilterModal
         visible={showFilterModal}
@@ -969,42 +1030,16 @@ const styles = StyleSheet.create({
   avatarBoxWrap: {
     position: 'relative',
   },
-  headerAvatarCutBox: {
-    width: 44,
-    height: 44,
-    overflow: 'hidden',
-  },
-  headerAvatarImg: {
-    width: '100%',
-    height: '100%',
-  },
   onlineStatusDot: {
     position: 'absolute',
-    bottom: -1,
-    right: -1,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    bottom: -2,
+    right: -2,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
     backgroundColor: '#00E699',
     borderWidth: 1.5,
     borderColor: '#090F1C',
-  },
-  greetingWrap: {
-    gap: 2,
-    flex: 1,
-  },
-  timestampText: {
-    fontFamily: fonts.mono,
-    fontSize: 9.5,
-    letterSpacing: 0.8,
-    color: '#8E9BB5',
-    textTransform: 'uppercase',
-  },
-  greetingText: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 15.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
   actionsGroup: {
     flexDirection: 'row',
@@ -1088,7 +1123,7 @@ const styles = StyleSheet.create({
   chipsScroll: {
     gap: 8,
     paddingBottom: 4,
-    marginBottom: 18,
+    marginBottom: 20,
   },
   chipPressable: {
     height: 32,
@@ -1115,8 +1150,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginTop: 18,
-    marginBottom: 12,
+    marginTop: 24,
+    marginBottom: 14,
     width: '100%',
   },
   sectionTitleBlock: {
@@ -1150,27 +1185,10 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     color: '#8E9BB5',
   },
-  carouselPaginationRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  pagPill: {
-    width: 14,
-    height: 2.5,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  pagPillActive: {
-    width: 24,
-    backgroundColor: '#00E5FF',
-  },
+  searchNoResults: { fontFamily: fonts.mono, fontSize: 11, letterSpacing: 0.4, textAlign: 'center', marginTop: 16 },
   horizontalScrollRow: {
     paddingRight: 12,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   recentActivitiesWrap: {
     gap: 8,
@@ -1186,14 +1204,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  activityAvatarBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
+  activityThumbBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: 'rgba(0, 229, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  activityKind: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    letterSpacing: 1.2,
+    color: '#00E5FF',
+    marginBottom: 2,
   },
   activityAvatarImg: {
     width: '100%',
@@ -1212,16 +1237,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#8E9BB5',
     marginTop: 2,
-  },
-  activityMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  activityTimeText: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    color: '#8E9BB5',
   },
   emptyCard: {
     width: '100%',

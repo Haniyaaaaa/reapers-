@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -22,6 +21,7 @@ import { useExpertStore } from '../../../store/expertStore';
 import { fonts } from '../../../theme';
 import { useTheme } from '../../../theme/useTheme';
 import type { WeeklyAvailability } from '../../../utils/expertSlots';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -131,7 +131,7 @@ export function ExpertAvailabilityScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
       >
@@ -238,7 +238,7 @@ export function ExpertAvailabilityScreen() {
             </View>
           </CyberCutBox>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

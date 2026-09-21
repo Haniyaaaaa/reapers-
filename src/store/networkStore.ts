@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import * as networkApi from '../services/supabase/network';
 import { captureException } from '../services/analytics/analytics';
 import { playSound } from '../services/sound';
+import { reconcile, swr, type FetchOpts } from './swr';
 import type { ConnectionSummary } from '../services/supabase/network';
 import type { PersonCard, TeamApplicant, TeamRequest } from '../types/extra';
 
@@ -9,6 +10,12 @@ type NetworkState = {
   people: PersonCard[];
   teams: TeamRequest[];
   teamsHasMore: boolean;
+  teamsFilter: networkApi.TeamRequestFilters;
+  myTeams: TeamRequest[];
+  myTeamsLoading: boolean;
+  fetchMyTeams: (userId: string) => Promise<void>;
+  deleteTeam: (id: string) => Promise<void>;
+  updateTeam: (id: string, req: networkApi.TeamRequestInput) => Promise<void>;
   appliedTeams: Set<string>;
   applicantsByTeam: Record<string, TeamApplicant[]>;
   applicantsLoading: Record<string, boolean>;
@@ -16,11 +23,11 @@ type NetworkState = {
   connectionsLoading: boolean;
   loading: boolean;
   error: string | null;
-  fetchPeople: (userId: string) => Promise<void>;
-  fetchTeams: (userId: string) => Promise<void>;
+  fetchPeople: (userId: string, opts?: FetchOpts) => Promise<void>;
+  fetchTeams: (userId: string, filters?: networkApi.TeamRequestFilters, opts?: FetchOpts) => Promise<void>;
   loadMoreTeams: () => Promise<void>;
   connectPerson: (myUserId: string, otherUserId: string) => Promise<void>;
-  postTeam: (posterId: string, req: { project: string; excerpt: string; roles: string[] }) => Promise<void>;
+  postTeam: (posterId: string, req: networkApi.TeamRequestInput) => Promise<void>;
   applyTeam: (userId: string, teamRequestId: string) => Promise<void>;
   fetchApplicants: (teamRequestId: string) => Promise<void>;
   fetchConnections: (userId: string) => Promise<void>;
@@ -31,6 +38,9 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
   people: [],
   teams: [],
   teamsHasMore: false,
+  teamsFilter: {},
+  myTeams: [],
+  myTeamsLoading: false,
   appliedTeams: new Set(),
   applicantsByTeam: {},
   applicantsLoading: {},
@@ -39,28 +49,47 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
   loading: false,
   error: null,
 
-  fetchPeople: async (userId) => {
-    set({ loading: true, error: null });
-    try {
-      const people = await networkApi.listPeople(userId);
-      set({ people, loading: false });
-    } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load people' });
-    }
-  },
+  fetchPeople: (userId, opts) =>
+    swr(
+      `people:${userId}`,
+      async () => {
+        // `loading` only means "nothing to show yet" — refreshing an existing list stays visible.
+        set((s) => ({ loading: s.people.length === 0, error: null }));
+        try {
+          const people = await networkApi.listPeople(userId);
+          set((s) => ({ people: reconcile(s.people, people), loading: false }));
+          return true;
+        } catch (err) {
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load people' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
-  fetchTeams: async (userId) => {
-    try {
-      const [{ rows, hasMore }, applied] = await Promise.all([networkApi.listTeamRequests(0), networkApi.listMyTeamApplications(userId)]);
-      set({ teams: rows, teamsHasMore: hasMore, appliedTeams: applied });
-    } catch (err) {
-      captureException(err);
-    }
+  fetchTeams: (userId, filters, opts) => {
+    // No argument = refresh with whatever filter is already active (pull-to-refresh, refocus);
+    // an argument replaces it (including {} to clear).
+    const active = filters ?? get().teamsFilter;
+    return swr(
+      `teams:${userId}:${JSON.stringify(active)}`,
+      async () => {
+        try {
+          const [{ rows, hasMore }, applied] = await Promise.all([networkApi.listTeamRequests(0, undefined, active), networkApi.listMyTeamApplications(userId)]);
+          set((s) => ({ teams: reconcile(s.teams, rows), teamsHasMore: hasMore, appliedTeams: applied, teamsFilter: active }));
+          return true;
+        } catch (err) {
+          captureException(err);
+          return false;
+        }
+      },
+      opts,
+    );
   },
 
   loadMoreTeams: async () => {
     try {
-      const { rows, hasMore } = await networkApi.listTeamRequests(get().teams.length);
+      const { rows, hasMore } = await networkApi.listTeamRequests(get().teams.length, undefined, get().teamsFilter);
       set((s) => ({ teams: [...s.teams, ...rows], teamsHasMore: hasMore }));
     } catch (err) {
       captureException(err);
@@ -80,10 +109,38 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
     }
   },
 
+  fetchMyTeams: async (userId) => {
+    set({ myTeamsLoading: true });
+    try {
+      set({ myTeams: await networkApi.listMyTeamRequests(userId), myTeamsLoading: false });
+    } catch (err) {
+      captureException(err);
+      set({ myTeamsLoading: false });
+    }
+  },
+
+  deleteTeam: async (id) => {
+    await networkApi.deleteTeamRequest(id);
+    set((st) => ({ myTeams: st.myTeams.filter((t) => t.id !== id), teams: st.teams.filter((t) => t.id !== id) }));
+  },
+
+  updateTeam: async (id, req) => {
+    try {
+      const updated = await networkApi.updateTeamRequest(id, req);
+      set((s) => ({
+        teams: s.teams.map((t) => (t.id === id ? updated : t)),
+        myTeams: s.myTeams.map((t) => (t.id === id ? { ...updated, applicantCount: t.applicantCount } : t)),
+      }));
+    } catch (err) {
+      captureException(err);
+      throw err;
+    }
+  },
+
   postTeam: async (posterId, req) => {
     try {
       const team = await networkApi.postTeamRequest(posterId, req);
-      set((s) => ({ teams: [team, ...s.teams] }));
+      set((s) => ({ teams: [team, ...s.teams], myTeams: [{ ...team, applicantCount: 0 }, ...s.myTeams] }));
     } catch (err) {
       captureException(err);
       throw err; // PostTeamRequestScreen's own try/catch shows the error inline

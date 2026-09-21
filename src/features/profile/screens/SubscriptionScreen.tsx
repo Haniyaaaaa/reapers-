@@ -1,7 +1,9 @@
+import { useSingleFlight } from '../../../hooks/useSingleFlight';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { BladeCard } from '../../../components/cards/BladeCard';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
@@ -44,7 +46,12 @@ export function SubscriptionScreen() {
     if (user) fetchMySubscription(user.id);
   }, [user, fetchPlans, fetchMySubscription]);
 
+  const refreshControl = useRefreshControl(async () => {
+    await Promise.all([fetchPlans(), user ? fetchMySubscription(user.id) : Promise.resolve()]);
+  });
+
   const pro = isPro();
+  const { run: runCancel, pending: cancelling } = useSingleFlight(() => (mySubscription ? cancelSubscription(mySubscription.id) : undefined));
 
   const onSubscribe = async (planId: string) => {
     if (!user || checkingOut) return;
@@ -53,7 +60,7 @@ export function SubscriptionScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title="Subscription" onBack={() => nav.goBack()} />
       <Text style={[styles.note, { color: colors.muted }]}>
         Free accounts get 1 community and 3 events. Paid plans raise those limits and unlock more.
@@ -71,11 +78,13 @@ export function SubscriptionScreen() {
             </Text>
           ) : null}
           <Pressable
-            onPress={() => cancelSubscription(mySubscription.id)}
-            style={[styles.btn, { borderColor: colors.danger, marginTop: 10 }]}
+            onPress={runCancel}
+            disabled={cancelling}
+            style={[styles.btn, { borderColor: colors.danger, marginTop: 10, opacity: cancelling ? 0.6 : 1 }]}
             accessibilityRole="button"
+            accessibilityState={{ busy: cancelling }}
           >
-            <Text style={{ color: colors.danger, fontFamily: fonts.bodyMed }}>Cancel</Text>
+            <Text style={{ color: colors.danger, fontFamily: fonts.bodyMed }}>{cancelling ? 'Cancelling…' : 'Cancel'}</Text>
           </Pressable>
         </BladeCard>
       ) : null}

@@ -36,6 +36,10 @@ export function demoRowToDemo(row: DemoRowWithDeveloper): Demo {
     isJamEntry: row.is_jam_entry,
     playCount: row.play_count,
     screenshotUrls: row.screenshot_urls,
+    tags: row.tags,
+    platforms: row.platforms,
+    portfolioUrl: row.portfolio_url ?? undefined,
+    pressKitUrl: row.press_kit_url ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -59,13 +63,52 @@ function commentRowToComment(row: DemoCommentRow, userName: string, avatarId?: s
 // `profiles(...)` embed became ambiguous (PGRST201) and every demos query started failing.
 const DEMO_SELECT = '*, profiles!demos_developer_id_fkey(display_name, avatar_uri, avatar_id)';
 
+export type DemoFilters = {
+  sort?: 'new' | 'top_rated';
+  jamOnly?: boolean;
+  /** Within one list any value matches (OR); across lists every list must match (AND). */
+  genres?: string[];
+  engines?: string[];
+  platforms?: string[];
+  tags?: string[];
+  /** Free-text search across title, description, genre/engine, tags, platforms and developer name. */
+  search?: string;
+};
+
+/** PostgREST `.or()` filter strings are comma/paren-delimited and `ilike` treats % and _ as
+ * wildcards, so user-typed custom values are stripped of those before being interpolated. */
+function safeFilterValue(v: string): string {
+  return v.replace(/[,()%_*\\]/g, ' ').trim();
+}
+
 export async function listDemos(
   offset = 0,
   limit = PAGE_SIZE,
-  opts?: { sort?: 'new' | 'top_rated'; jamOnly?: boolean },
+  opts?: DemoFilters,
 ): Promise<Page<Demo>> {
   let query = supabase.from('demos').select(DEMO_SELECT);
   if (opts?.jamOnly) query = query.eq('is_jam_entry', true);
+  // demos.genre stores "Genre · Engine" in a single string (see DemoUploadScreen).
+  const genres = (opts?.genres ?? []).map(safeFilterValue).filter(Boolean);
+  if (genres.length) query = query.or(genres.map((g) => `genre.ilike.${g} · %`).join(','));
+  const engines = (opts?.engines ?? []).map(safeFilterValue).filter(Boolean);
+  if (engines.length) query = query.or(engines.map((e) => `genre.ilike.% · ${e}`).join(','));
+  if (opts?.platforms?.length) query = query.overlaps('platforms', opts.platforms);
+  const term = safeFilterValue(opts?.search ?? '');
+  if (term) {
+    // Developer names live on profiles, so resolve matching developers first and OR their ids in.
+    const { data: devs } = await supabase.from('profiles').select('id').ilike('display_name', `%${term}%`).limit(50);
+    const clauses = [
+      `title.ilike.%${term}%`,
+      `description.ilike.%${term}%`,
+      `genre.ilike.%${term}%`,
+      `tags.cs.{${term.toUpperCase()}}`,
+      `platforms.cs.{${term.toUpperCase()}}`,
+    ];
+    if (devs?.length) clauses.push(`developer_id.in.(${devs.map((p) => p.id).join(',')})`);
+    query = query.or(clauses.join(','));
+  }
+  if (opts?.tags?.length) query = query.overlaps('tags', opts.tags);
   query =
     opts?.sort === 'top_rated'
       ? query.order('total_score', { ascending: false }).order('review_count', { ascending: false })
@@ -74,6 +117,25 @@ export async function listDemos(
   if (error) throw error;
   const page = toPage(data as unknown as DemoRowWithDeveloper[] | null, limit);
   return { rows: page.rows.map(demoRowToDemo), hasMore: page.hasMore };
+}
+
+/** Every genre/engine/platform/tag value actually in use across demos (custom ones included),
+ * so the filter sheet can offer them alongside the presets. */
+export async function listDemoFacets(): Promise<{ genres: string[]; engines: string[]; platforms: string[]; tags: string[] }> {
+  const { data, error } = await supabase.from('demos').select('genre, platforms, tags').limit(1000);
+  if (error) throw error;
+  const genres = new Set<string>();
+  const engines = new Set<string>();
+  const platforms = new Set<string>();
+  const tags = new Set<string>();
+  for (const row of data ?? []) {
+    const [g, ...rest] = (row.genre ?? '').split(' · ');
+    if (g) genres.add(g);
+    if (rest.length) engines.add(rest.join(' · '));
+    (row.platforms ?? []).forEach((p: string) => platforms.add(p));
+    (row.tags ?? []).forEach((t: string) => tags.add(t));
+  }
+  return { genres: [...genres], engines: [...engines], platforms: [...platforms], tags: [...tags] };
 }
 
 export async function getDemo(id: string): Promise<Demo | null> {

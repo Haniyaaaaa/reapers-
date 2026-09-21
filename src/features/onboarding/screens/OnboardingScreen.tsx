@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { loadOnboardingDraft, saveOnboardingDraft } from '../../../services/onboardingDraft';
+import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -6,7 +7,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -27,10 +27,14 @@ import {
   DEFAULT_AVATAR_ID,
   getCyberAvatarById,
 } from '../../../data/cyberAvatars';
-import { gameOptions, skillOptions } from '../../../data/mock';
+import { genreOptions } from '../../../data/mock';
+import { EXPERTISE_TAGS } from '../../../types/expert';
+import { isUsernameAvailable } from '../../../services/supabase/profiles';
+import { isLinkedInUrl, isUrl, isValidUsername, normalizeUrl } from '../../../utils/validation';
 import { useAuth } from '../../../hooks/useAuth';
 import { fonts, useTheme } from '../../../theme';
 import type { Role } from '../../../types/user';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 40, 420);
@@ -49,10 +53,7 @@ const TAG_SECTIONS = {
     'PRODUCER',
   ],
   systems: ['NETCODE', 'GAMEPLAY SYSTEMS', 'SHADERS', 'TOOLS', 'AI', 'PHYSICS'],
-  interests: ['ROGUELITES', 'IMMERSIVE SIMS', 'CO-OP DESIGN', 'SIM SYSTEMS', 'HORROR', 'RPG', 'STRATEGY'],
 };
-
-const EXPERIENCE_OPTIONS = ['< 1 yr', '1–3 yrs', '3–5 yrs', '5–8 yrs', '8+ yrs'];
 
 export function OnboardingScreen() {
   const { completeOnboarding, user, logout } = useAuth();
@@ -69,7 +70,7 @@ export function OnboardingScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   // Form Fields - Preserving 100% of current system
-  const [roles, setRoles] = useState<Role[]>(user?.roles?.length ? user.roles : ['developer']);
+  const [roles, setRoles] = useState<Role[]>(user?.roles?.length ? [user.roles[0]] : ['developer']);
   const [fullName, setFullName] = useState(user?.displayName ?? '');
   const [username, setUsername] = useState(user?.username ?? '');
   const [bio, setBio] = useState(user?.bio ?? '');
@@ -78,23 +79,99 @@ export function OnboardingScreen() {
   const [avatarLook, setAvatarLook] = useState(user?.avatarLook);
   const [linkedin, setLinkedin] = useState(user?.linkedinUrl ?? '');
   const [portfolio, setPortfolio] = useState(user?.portfolioUrl ?? '');
-  const [experience, setExperience] = useState('5–8 yrs');
   const [company, setCompany] = useState('');
   const [expertRole, setExpertRole] = useState('');
 
-  // Selected tags & games
-  const [selectedTags, setSelectedTags] = useState<string[]>(user?.skills?.length ? user.skills : ['UNITY', 'C#', 'NETCODE']);
-  const [selectedGames, setSelectedGames] = useState<string[]>(user?.games?.length ? user.games : ['Fortnite', 'Valorant']);
+  // Nothing is pre-selected — every value submitted was actually chosen by the user.
+  const [selectedTags, setSelectedTags] = useState<string[]>(user?.skills ?? []);
+  // Gamer: "What kind of games do you like to play?" (profiles.games)
+  const [selectedGames, setSelectedGames] = useState<string[]>(user?.games ?? []);
+  // Game Developer: "What genre are you into?" (profiles.interests)
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(user?.interests ?? []);
+  const [customTag, setCustomTag] = useState('');
 
   const [showAvatarBuilderModal, setShowAvatarBuilderModal] = useState(false);
   const [userErr, setUserErr] = useState('');
   const [nameErr, setNameErr] = useState('');
   const [roleErr, setRoleErr] = useState('');
+  const [bioErr, setBioErr] = useState('');
+  const [linkedinErr, setLinkedinErr] = useState('');
+  const [portfolioErr, setPortfolioErr] = useState('');
+  const [companyErr, setCompanyErr] = useState('');
+  const [expertRoleErr, setExpertRoleErr] = useState('');
+  const [skillsErr, setSkillsErr] = useState('');
+  const [submitErr, setSubmitErr] = useState('');
+  const [checkingUsername, setCheckingUsername] = useState(false);
+
+  // Resume where the user left off: progress is saved on this device as they go (see
+  // services/onboardingDraft) and restored here, instead of every restart beginning at step 1.
+  const userId = user?.id;
+  const [draftLoaded, setDraftLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!userId) {
+      setDraftLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    loadOnboardingDraft(userId).then((d) => {
+      if (cancelled) return;
+      if (d) {
+        setRoles(d.roles as Role[]);
+        setFullName(d.fullName);
+        setUsername(d.username);
+        setBio(d.bio);
+        setLinkedin(d.linkedin);
+        setPortfolio(d.portfolio);
+        setCompany(d.company);
+        setExpertRole(d.expertRole);
+        setSelectedTags(d.selectedTags);
+        setSelectedGames(d.selectedGames);
+        setSelectedGenres(d.selectedGenres);
+        if (d.avatarId) setAvatarId(d.avatarId);
+        if (d.avatarUri) setAvatarUri(d.avatarUri);
+        // Never resume into the avatar builder (a full-screen sub-flow); land on the step before it.
+        setStep(Math.min(Math.max(d.step, 0), 4) === 3 ? 2 : Math.min(Math.max(d.step, 0), 4));
+      }
+      setDraftLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!draftLoaded || !userId) return;
+    const t = setTimeout(() => {
+      saveOnboardingDraft(userId, {
+        step,
+        roles,
+        fullName,
+        username,
+        bio,
+        linkedin,
+        portfolio,
+        company,
+        expertRole,
+        selectedTags,
+        selectedGames,
+        selectedGenres,
+        avatarId,
+        avatarUri: avatarUri && /^https?:\/\//.test(avatarUri) ? avatarUri : undefined,
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [draftLoaded, userId, step, roles, fullName, username, bio, linkedin, portfolio, company, expertRole, selectedTags, selectedGames, selectedGenres, avatarId, avatarUri]);
+
+  const role: Role = roles[0] ?? 'gamer';
+  const isDev = role === 'developer';
+  const isExpert = role === 'expert';
+  const isGamer = role === 'gamer';
 
   const selectedCyberAvatar = getCyberAvatarById(avatarId);
 
   const toggleRole = (r: Role) => {
-    setRoles((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+    setRoles([r]); // one role at a time
     if (roleErr) setRoleErr('');
   };
 
@@ -102,12 +179,27 @@ export function OnboardingScreen() {
     setSelectedTags((cur) =>
       cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]
     );
+    if (skillsErr) setSkillsErr('');
+  };
+
+  const toggleGenre = (g: string) => {
+    setSelectedGenres((cur) => (cur.includes(g) ? cur.filter((x) => x !== g) : [...cur, g]));
+    if (skillsErr) setSkillsErr('');
+  };
+
+  const addCustomTag = () => {
+    const v = customTag.trim().toUpperCase();
+    if (!v || v.length > 24) return;
+    setSelectedTags((cur) => (cur.includes(v) ? cur : [...cur, v]));
+    setCustomTag('');
+    if (skillsErr) setSkillsErr('');
   };
 
   const toggleGame = (game: string) => {
     setSelectedGames((cur) =>
       cur.includes(game) ? cur.filter((g) => g !== game) : [...cur, game]
     );
+    if (skillsErr) setSkillsErr('');
   };
 
   const next = async () => {
@@ -122,18 +214,64 @@ export function OnboardingScreen() {
     }
 
     if (step === 1) {
-      const u = username.trim();
+      const u = username.trim().toLowerCase();
       const n = fullName.trim();
       let hasErr = false;
-      if (!u || u.length < 3) {
-        setUserErr('Username must be at least 3 characters');
-        hasErr = true;
-      }
       if (!n) {
         setNameErr('Full name is required');
         hasErr = true;
       }
+      if (!isValidUsername(u)) {
+        setUserErr('3–20 characters: letters, numbers, dot, dash or underscore');
+        hasErr = true;
+      }
+      if (bio.trim().length < 10) {
+        setBioErr('Tell us a little about yourself (at least 10 characters)');
+        hasErr = true;
+      }
+      if (isDev) {
+        if (!portfolio.trim()) {
+          setPortfolioErr('Portfolio link is required');
+          hasErr = true;
+        } else if (!isUrl(portfolio)) {
+          setPortfolioErr('Enter a valid link, e.g. yourname.dev');
+          hasErr = true;
+        }
+      }
+      if (isDev || isExpert) {
+        if (!linkedin.trim()) {
+          setLinkedinErr('LinkedIn profile is required');
+          hasErr = true;
+        } else if (!isLinkedInUrl(linkedin)) {
+          setLinkedinErr('Enter a valid LinkedIn link, e.g. linkedin.com/in/yourname');
+          hasErr = true;
+        }
+      }
+      if (isExpert) {
+        if (!company.trim()) {
+          setCompanyErr('Company is required');
+          hasErr = true;
+        }
+        if (!expertRole.trim()) {
+          setExpertRoleErr('Title is required');
+          hasErr = true;
+        }
+      }
       if (hasErr) return;
+
+      setCheckingUsername(true);
+      try {
+        const free = await isUsernameAvailable(u, user?.id);
+        if (!free) {
+          setUserErr('That username is already taken');
+          return;
+        }
+      } catch {
+        // Availability is re-enforced by the DB's unique constraint on submit — don't block on a flaky check.
+      } finally {
+        setCheckingUsername(false);
+      }
+      setUsername(u);
       setUserErr('');
       setNameErr('');
       setStep(2);
@@ -141,6 +279,23 @@ export function OnboardingScreen() {
     }
 
     if (step === 2) {
+      if (isGamer && selectedGames.length === 0) {
+        setSkillsErr('Pick at least one kind of game you like');
+        return;
+      }
+      if (isDev && selectedTags.length === 0) {
+        setSkillsErr('Pick at least one tag');
+        return;
+      }
+      if (isDev && selectedGenres.length === 0) {
+        setSkillsErr('Pick at least one genre you are into');
+        return;
+      }
+      if (isExpert && selectedTags.length === 0) {
+        setSkillsErr('Pick at least one area of expertise');
+        return;
+      }
+      setSkillsErr('');
       setStep(3); // Advances to Avatar Builder
       return;
     }
@@ -152,14 +307,17 @@ export function OnboardingScreen() {
 
     // Step 4 is Final Submission
     setSubmitting(true);
+    setSubmitErr('');
     try {
       const nameParts = fullName.trim().split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
+      const linkedinUrl = isDev || isExpert ? normalizeUrl(linkedin) : '';
+      const portfolioUrl = isDev ? normalizeUrl(portfolio) : '';
 
       await completeOnboarding(
         {
-          username: username.trim(),
+          username: username.trim().toLowerCase(),
           displayName: fullName.trim() || username.trim(),
           firstName,
           lastName,
@@ -168,25 +326,26 @@ export function OnboardingScreen() {
           avatarId: avatarUri ? undefined : avatarId,
           avatarLook: avatarUri ? undefined : avatarLook,
           roles,
-          skills: selectedTags,
-          tags: selectedTags,
-          games: roles.includes('gamer') ? selectedGames : [],
-          linkedinUrl: linkedin.trim(),
-          portfolioUrl: portfolio.trim(),
+          skills: isGamer ? [] : selectedTags,
+          tags: isGamer ? [] : selectedTags,
+          games: isGamer ? selectedGames : [],
+          interests: isDev ? selectedGenres : [],
+          linkedinUrl,
+          portfolioUrl,
         },
-        roles.includes('expert')
+        isExpert
           ? {
-              role: expertRole.trim() || 'Industry professional',
+              role: expertRole.trim(),
               company: company.trim(),
               bio: bio.trim(),
               specialties: selectedTags,
-              portfolioUrl: portfolio.trim(),
-              linkedinUrl: linkedin.trim(),
+              linkedinUrl,
             }
           : undefined
       );
     } catch (err) {
       console.error('Onboarding completion error:', err);
+      setSubmitErr(err instanceof Error ? err.message : 'Could not finish setting up your profile. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -201,17 +360,24 @@ export function OnboardingScreen() {
     { stepText: 'YOU’RE ALL SET', progress: '100%', width: '100%' },
   ];
 
+  // Hold the first paint until any saved progress is applied, so a returning user doesn't see the
+  // wizard flash at step 1 before jumping to where they left off.
+  if (!draftLoaded) {
+    return <View style={[styles.container, { backgroundColor: colors.background }]} />;
+  }
+
   // Dedicated Avatar Builder screen at Step 3
   if (step === 3) {
     return (
       <AvatarBuilderScreen
         initialAvatarId={avatarId}
+        initialAvatarUri={avatarUri}
         userName={fullName || username || 'Kade Rourke'}
         stepLabel="STEP 5 OF 5 · AVATAR"
         progressPercent="100%"
-        onSaveAvatar={(item) => {
+        onSaveAvatar={(item, customUri) => {
           setAvatarId(item.id);
-          setAvatarUri(undefined);
+          setAvatarUri(customUri);
           setStep(4);
         }}
         onClose={() => setStep(2)}
@@ -233,7 +399,7 @@ export function OnboardingScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          <ScrollView
+          <KeyboardAwareScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -397,7 +563,7 @@ export function OnboardingScreen() {
                       setFullName(v);
                       if (nameErr) setNameErr('');
                     }}
-                    placeholder="Kade Rourke"
+                    placeholder="Ayesha Khan"
                     error={nameErr}
                   />
 
@@ -410,7 +576,7 @@ export function OnboardingScreen() {
                       if (userErr) setUserErr('');
                     }}
                     autoCapitalize="none"
-                    placeholder="kaderourke"
+                    placeholder="ayeshakhan"
                     error={userErr}
                   />
 
@@ -418,79 +584,80 @@ export function OnboardingScreen() {
                     label="BIO"
                     required
                     value={bio}
-                    onChangeText={setBio}
+                    onChangeText={(v) => {
+                      setBio(v);
+                      if (bioErr) setBioErr('');
+                    }}
                     multiline
                     numberOfLines={3}
-                    placeholder="Systems-first gameplay engineer shipping tactical roguelites."
-                    hint="160 characters. What you work on, plainly."
+                    placeholder={
+                      isGamer
+                        ? 'Co-op enthusiast, weekend ranked grinder.'
+                        : isExpert
+                        ? 'What you have shipped and what you can help studios with.'
+                        : 'Systems-first gameplay engineer shipping tactical roguelites.'
+                    }
+                    hint="160 characters. Plain and specific."
                     maxLength={160}
+                    error={bioErr}
                     style={styles.bioInput}
                   />
 
-                  <CyberTextField
-                    label="LINKEDIN"
-                    required
-                    value={linkedin}
-                    onChangeText={setLinkedin}
-                    autoCapitalize="none"
-                    placeholder="linkedin.com/in/kaderourke"
-                  />
+                  {isDev && (
+                    <CyberTextField
+                      label="PORTFOLIO"
+                      required
+                      value={portfolio}
+                      onChangeText={(v) => {
+                        setPortfolio(v);
+                        if (portfolioErr) setPortfolioErr('');
+                      }}
+                      autoCapitalize="none"
+                      keyboardType="url"
+                      placeholder="ayeshakhan.dev"
+                      error={portfolioErr}
+                    />
+                  )}
 
-                  <CyberTextField
-                    label="PORTFOLIO"
-                    required
-                    value={portfolio}
-                    onChangeText={setPortfolio}
-                    autoCapitalize="none"
-                    placeholder="kaderourke.dev"
-                  />
+                  {(isDev || isExpert) && (
+                    <CyberTextField
+                      label="LINKEDIN"
+                      required
+                      value={linkedin}
+                      onChangeText={(v) => {
+                        setLinkedin(v);
+                        if (linkedinErr) setLinkedinErr('');
+                      }}
+                      autoCapitalize="none"
+                      keyboardType="url"
+                      placeholder="linkedin.com/in/ayeshakhan"
+                      error={linkedinErr}
+                    />
+                  )}
 
-                  {/* Experience Selector */}
-                  <View style={styles.experienceWrap}>
-                    <Text style={[styles.expLabel, { color: colors.muted }]}>EXPERIENCE *</Text>
-                    <View style={styles.expChipsRow}>
-                      {EXPERIENCE_OPTIONS.map((opt) => {
-                        const selected = experience === opt;
-                        return (
-                          <Pressable
-                            key={opt}
-                            onPress={() => setExperience(opt)}
-                            style={styles.expChipPressable}
-                          >
-                            <CyberCutBox
-                              cutSize={6}
-                              radius={3}
-                              fill={selected ? (isLight ? 'rgba(109, 53, 255, 0.15)' : 'rgba(109, 53, 255, 0.4)') : (isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.8)')}
-                              borderColor={selected ? (isLight ? colors.primary : '#00E5FF') : (isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.1)')}
-                              borderWidth={1}
-                              style={styles.expChipBox}
-                            >
-                              <Text style={[styles.expChipText, { color: selected ? (isLight ? colors.primary : '#00E5FF') : colors.muted }, selected && styles.expChipTextActive]}>
-                                {opt}
-                              </Text>
-                            </CyberCutBox>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  {/* If Expert: Company & Title */}
-                  {roles.includes('expert') && (
+                  {isExpert && (
                     <>
                       <CyberTextField
                         label="COMPANY"
                         required
                         value={company}
-                        onChangeText={setCompany}
+                        onChangeText={(v) => {
+                          setCompany(v);
+                          if (companyErr) setCompanyErr('');
+                        }}
                         placeholder="Studio or Company name"
+                        error={companyErr}
                       />
                       <CyberTextField
                         label="EXPERT ROLE / TITLE"
                         required
                         value={expertRole}
-                        onChangeText={setExpertRole}
+                        onChangeText={(v) => {
+                          setExpertRole(v);
+                          if (expertRoleErr) setExpertRoleErr('');
+                        }}
                         placeholder="e.g. Lead Combat Designer"
+                        error={expertRoleErr}
                       />
                     </>
                   )}
@@ -501,118 +668,112 @@ export function OnboardingScreen() {
               {step === 2 && (
                 <View style={styles.stepBlock}>
                   <View style={styles.skillsHeader}>
-                    <Text style={[styles.title, { color: colors.text }]}>Skills & Tags</Text>
+                    <Text style={[styles.title, { color: colors.text }]}>
+                      {isGamer ? 'Your Games' : isExpert ? 'Your Expertise' : 'Skills & Tags'}
+                    </Text>
                     <Text style={styles.selectedCountBadge}>
-                      {selectedTags.length} SELECTED
+                      {(isGamer ? selectedGames.length : selectedTags.length + (isDev ? selectedGenres.length : 0))} SELECTED
                     </Text>
                   </View>
 
-                  {/* Information Banner */}
-                  <CyberCutBox
-                    cutSize={10}
-                    radius={4}
-                    fill={isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.75)'}
-                    borderColor={isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.1)'}
-                    borderWidth={1}
-                    style={styles.infoBox}
-                  >
-                    <Text style={[styles.infoText, { color: colors.muted }]}>
-                      These tags are structured — the matching engine uses them to surface teammates, team requests and experts. Pick precisely.
-                    </Text>
-                  </CyberCutBox>
-
-                  {/* Engines */}
-                  <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>ENGINES</Text>
-                  <View style={styles.chipRow}>
-                    {TAG_SECTIONS.engines.map((t) => (
-                      <CyberChip
-                        key={t}
-                        label={t}
-                        selected={selectedTags.includes(t)}
-                        onPress={() => toggleTag(t)}
-                      />
-                    ))}
-                  </View>
-
-                  {/* Languages */}
-                  <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>LANGUAGES</Text>
-                  <View style={styles.chipRow}>
-                    {TAG_SECTIONS.languages.map((t) => (
-                      <CyberChip
-                        key={t}
-                        label={t}
-                        selected={selectedTags.includes(t)}
-                        onPress={() => toggleTag(t)}
-                      />
-                    ))}
-                  </View>
-
-                  {/* Disciplines */}
-                  <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>DISCIPLINES</Text>
-                  <View style={styles.chipRow}>
-                    {TAG_SECTIONS.disciplines.map((t) => (
-                      <CyberChip
-                        key={t}
-                        label={t}
-                        selected={selectedTags.includes(t)}
-                        onPress={() => toggleTag(t)}
-                      />
-                    ))}
-                  </View>
-
-                  {/* Systems */}
-                  <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>SYSTEMS</Text>
-                  <View style={styles.chipRow}>
-                    {TAG_SECTIONS.systems.map((t) => (
-                      <CyberChip
-                        key={t}
-                        label={t}
-                        selected={selectedTags.includes(t)}
-                        onPress={() => toggleTag(t)}
-                      />
-                    ))}
-                  </View>
-
-                  {/* Interests */}
-                  <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>INTERESTS</Text>
-                  <View style={styles.chipRow}>
-                    {TAG_SECTIONS.interests.map((t) => (
-                      <CyberChip
-                        key={t}
-                        label={t}
-                        selected={selectedTags.includes(t)}
-                        onPress={() => toggleTag(t)}
-                      />
-                    ))}
-                  </View>
-
-                  {/* Gamer Favorite Games (if Gamer role selected) */}
-                  {roles.includes('gamer') && (
+                  {/* ---- Gamer: What kind of games do you like to play? ---- */}
+                  {isGamer && (
                     <>
-                      <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>FAVORITE GAMES</Text>
+                      <Text style={[styles.categoryTitle, { color: colors.text, fontSize: 16, letterSpacing: 0 }]}>
+                        What kind of games do you like to play?
+                      </Text>
                       <View style={styles.chipRow}>
-                        {gameOptions.map((g) => (
-                          <CyberChip
-                            key={g}
-                            label={g}
-                            selected={selectedGames.includes(g)}
-                            onPress={() => toggleGame(g)}
-                          />
+                        {genreOptions.map((g) => (
+                          <CyberChip key={g} label={g} selected={selectedGames.includes(g)} onPress={() => toggleGame(g)} />
                         ))}
                       </View>
                     </>
                   )}
 
-                  {/* Bottom Selected Pills */}
-                  {selectedTags.length > 0 && (
-                    <View style={[styles.selectedPillRow, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
-                      {selectedTags.map((t) => (
-                        <View key={t} style={styles.miniTag}>
-                          <Text style={styles.miniTagText}>{t}</Text>
+                  {/* ---- Developer / Expert: tags ---- */}
+                  {(isDev || isExpert) && (
+                    <>
+                      <CyberCutBox
+                        cutSize={10}
+                        radius={4}
+                        fill={isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.75)'}
+                        borderColor={isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.1)'}
+                        borderWidth={1}
+                        style={styles.infoBox}
+                      >
+                        <Text style={[styles.infoText, { color: colors.muted }]}>
+                          {isDev
+                            ? 'Tags are structured — the matching engine uses them to surface teammates and team requests. Add your own if yours is missing.'
+                            : 'Pick the areas you can advise on. Studios find and book experts by these tags.'}
+                        </Text>
+                      </CyberCutBox>
+
+                      {isDev
+                        ? (Object.keys(TAG_SECTIONS) as (keyof typeof TAG_SECTIONS)[]).map((section) => (
+                            <View key={section}>
+                              <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>{section.toUpperCase()}</Text>
+                              <View style={styles.chipRow}>
+                                {TAG_SECTIONS[section].map((t) => (
+                                  <CyberChip key={t} label={t} selected={selectedTags.includes(t)} onPress={() => toggleTag(t)} />
+                                ))}
+                              </View>
+                            </View>
+                          ))
+                        : (
+                          <View style={styles.chipRow}>
+                            {EXPERTISE_TAGS.map((t) => (
+                              <CyberChip key={t} label={t} selected={selectedTags.includes(t)} onPress={() => toggleTag(t)} />
+                            ))}
+                          </View>
+                        )}
+
+                      {/* Custom tag */}
+                      <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>ADD YOUR OWN</Text>
+                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <CyberTextField
+                            label=""
+                            value={customTag}
+                            onChangeText={setCustomTag}
+                            onSubmitEditing={addCustomTag}
+                            autoCapitalize="characters"
+                            placeholder="e.g. GODOT, LEVEL DESIGN"
+                            maxLength={24}
+                          />
                         </View>
-                      ))}
-                    </View>
+                        <Pressable onPress={addCustomTag} accessibilityRole="button" style={{ height: 52, width: 76, marginTop: 4 }}>
+                          <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={{ fontFamily: fonts.monoBold, fontSize: 12, letterSpacing: 0.8, color: '#FFFFFF' }}>ADD</Text>
+                          </CyberCutBox>
+                        </Pressable>
+                      </View>
+                      {selectedTags.filter((t) => ![...Object.values(TAG_SECTIONS).flat(), ...EXPERTISE_TAGS].includes(t)).length > 0 && (
+                        <View style={styles.chipRow}>
+                          {selectedTags
+                            .filter((t) => ![...Object.values(TAG_SECTIONS).flat(), ...EXPERTISE_TAGS].includes(t))
+                            .map((t) => (
+                              <CyberChip key={t} label={t} selected onPress={() => toggleTag(t)} />
+                            ))}
+                        </View>
+                      )}
+                    </>
                   )}
+
+                  {/* ---- Developer: What genre are you into? ---- */}
+                  {isDev && (
+                    <>
+                      <Text style={[styles.categoryTitle, { color: colors.text, fontSize: 16, letterSpacing: 0, marginTop: 8 }]}>
+                        What genre are you into?
+                      </Text>
+                      <View style={styles.chipRow}>
+                        {genreOptions.map((g) => (
+                          <CyberChip key={g} label={g} selected={selectedGenres.includes(g)} onPress={() => toggleGenre(g)} />
+                        ))}
+                      </View>
+                    </>
+                  )}
+
+                  {skillsErr ? <Text style={{ color: '#FF4D6D', fontFamily: fonts.bodySemi, fontSize: 13, marginTop: 4 }}>{skillsErr}</Text> : null}
                 </View>
               )}
 
@@ -671,40 +832,42 @@ export function OnboardingScreen() {
 
                       <Text style={[styles.reviewBio, { color: colors.muted }]}>{bio || 'No bio specified'}</Text>
 
-                      {selectedTags.length > 0 && (
+                      {!isGamer && selectedTags.length > 0 && (
                         <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
-                          <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>SKILLS & TAGS</Text>
+                          <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>{isExpert ? 'EXPERTISE' : 'SKILLS & TAGS'}</Text>
                           <Text style={[styles.reviewSecValue, { color: colors.text }]}>{selectedTags.join(', ')}</Text>
                         </View>
                       )}
 
-                      {roles.includes('gamer') && selectedGames.length > 0 && (
+                      {isDev && selectedGenres.length > 0 && (
                         <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
-                          <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>FAVORITE GAMES</Text>
+                          <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>GENRES</Text>
+                          <Text style={[styles.reviewSecValue, { color: colors.text }]}>{selectedGenres.join(', ')}</Text>
+                        </View>
+                      )}
+
+                      {isGamer && selectedGames.length > 0 && (
+                        <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
+                          <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>GAMES YOU LIKE</Text>
                           <Text style={[styles.reviewSecValue, { color: colors.text }]}>{selectedGames.join(', ')}</Text>
                         </View>
                       )}
 
-                      <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
-                        <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>EXPERIENCE</Text>
-                        <Text style={[styles.reviewSecValue, { color: colors.text }]}>{experience}</Text>
-                      </View>
-
-                      {linkedin ? (
+                      {(isDev || isExpert) && linkedin ? (
                         <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
                           <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>LINKEDIN</Text>
                           <Text style={[styles.reviewSecValue, { color: colors.text }]}>{linkedin}</Text>
                         </View>
                       ) : null}
 
-                      {portfolio ? (
+                      {isDev && portfolio ? (
                         <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
                           <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>PORTFOLIO</Text>
                           <Text style={[styles.reviewSecValue, { color: colors.text }]}>{portfolio}</Text>
                         </View>
                       ) : null}
 
-                      {roles.includes('expert') && company ? (
+                      {isExpert && company ? (
                         <View style={[styles.reviewSection, { borderTopColor: isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }]}>
                           <Text style={[styles.reviewSecLabel, { color: colors.muted2 }]}>EXPERT APPLICATION</Text>
                           <Text style={[styles.reviewSecValue, { color: colors.text }]}>
@@ -717,12 +880,16 @@ export function OnboardingScreen() {
                 </View>
               )}
 
+              {submitErr ? (
+                <Text style={{ color: '#FF4D6D', fontFamily: fonts.bodySemi, fontSize: 13, textAlign: 'center', marginBottom: 10 }}>{submitErr}</Text>
+              ) : null}
+
               {/* Action Buttons */}
               <CyberButton
                 label={step === 4 ? 'ENTER REAPERS' : 'Continue'}
                 onPress={next}
-                loading={submitting}
-                disabled={submitting}
+                loading={submitting || checkingUsername}
+                disabled={submitting || checkingUsername}
                 style={styles.actionBtn}
               />
 
@@ -736,7 +903,7 @@ export function OnboardingScreen() {
                 </Pressable>
               )}
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
 
@@ -748,12 +915,13 @@ export function OnboardingScreen() {
       >
         <AvatarBuilderScreen
           initialAvatarId={avatarId}
+          initialAvatarUri={avatarUri}
           userName={fullName || username || 'Kade Rourke'}
           stepLabel="AVATAR BUILDER"
           progressPercent="100%"
-          onSaveAvatar={(item) => {
+          onSaveAvatar={(item, customUri) => {
             setAvatarId(item.id);
-            setAvatarUri(undefined);
+            setAvatarUri(customUri);
             setShowAvatarBuilderModal(false);
           }}
           onClose={() => setShowAvatarBuilderModal(false)}

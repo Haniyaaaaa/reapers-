@@ -1,4 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
+import { normalizeUrl } from '../../../utils/validation';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,7 +11,6 @@ import {
   Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -29,17 +29,19 @@ import { useDemoStore } from '../../../store/demoStore';
 import { supabase } from '../../../services/supabase/client';
 import { deleteObjectByPublicUrl, uploadDemoScreenshot, uploadDemoThumbnail, uploadDemoVideo } from '../../../services/supabase/storage';
 import { fonts, useTheme } from '../../../theme';
+import { DEMO_ENGINES, DEMO_GENRES, DEMO_PLATFORMS, DEMO_TAGS } from '../../../data/demoOptions';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 // Matches the DB's demos_duration_range check constraint (0055 migration) — kept in sync so a
 // too-long/too-short video is caught here, before uploading it, instead of failing at the
 // final DB insert after the upload already completed.
-const MIN_DEMO_DURATION_SEC = 30;
-const MAX_DEMO_DURATION_SEC = 120;
+const MIN_DEMO_DURATION_SEC = 1;
+const MAX_DEMO_DURATION_SEC = 60;
 
-const GENRES_LIST = ['Tactics', 'Action RPG', 'FPS', 'Platformer', 'Strategy', 'Puzzle', 'RPG', 'Simulation', 'Horror', 'Adventure'];
-const ENGINES_LIST = ['Unity', 'Unreal Engine', 'Godot', 'Custom Engine', 'WebAssembly'];
-const PLATFORMS_LIST = ['PC', 'MAC', 'LINUX', 'SWITCH', 'PS5', 'XBOX', 'WEB', 'MOBILE'];
-const TAGS_LIST = ['TACTICS', 'SCI-FI', 'TURN-BASED', 'ROGUELIKE', 'CO-OP', 'UNITY'];
+const GENRES_LIST = DEMO_GENRES;
+const ENGINES_LIST = DEMO_ENGINES;
+const PLATFORMS_LIST = DEMO_PLATFORMS;
+const TAGS_LIST = DEMO_TAGS;
 
 export function DemoUploadScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -69,6 +71,7 @@ export function DemoUploadScreen() {
   const [engine, setEngine] = useState('Unity');
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['PC', 'MAC']);
   const [selectedTags, setSelectedTags] = useState<string[]>(['SCI-FI']);
+  const [customTag, setCustomTag] = useState('');
 
   // Modals for Genre & Engine selection
   const [showGenrePicker, setShowGenrePicker] = useState(false);
@@ -119,9 +122,9 @@ export function DemoUploadScreen() {
     setFileName(name ?? 'build_demo.mp4');
     setFailed(null);
     if (sec < MIN_DEMO_DURATION_SEC) {
-      setVideoErr(`Video is too short — must be at least ${MIN_DEMO_DURATION_SEC}s.`);
+      setVideoErr('Could not read this video — pick a different file.');
     } else if (sec > MAX_DEMO_DURATION_SEC) {
-      setVideoErr(`Video is too long — must be ${MAX_DEMO_DURATION_SEC / 60} minutes or less.`);
+      setVideoErr('Video is too long — must be 1 minute or less.');
     } else {
       setVideoErr('');
     }
@@ -168,6 +171,13 @@ export function DemoUploadScreen() {
     } else {
       setSelectedTags([...selectedTags, t]);
     }
+  };
+
+  const addCustomTag = () => {
+    const t = customTag.trim().toUpperCase();
+    if (!t) return;
+    if (!selectedTags.includes(t)) setSelectedTags([...selectedTags, t]);
+    setCustomTag('');
   };
 
   const upload = async () => {
@@ -223,9 +233,13 @@ export function DemoUploadScreen() {
         thumbnailUrl,
         videoUrl,
         durationSec: duration ?? 45,
-        externalUrl: link.trim() || undefined,
+        externalUrl: normalizeUrl(link) || undefined,
         isJamEntry: selectedTags.includes('JAM ENTRY'),
         screenshotUrls,
+        tags: selectedTags,
+        platforms: selectedPlatforms,
+        portfolioUrl: normalizeUrl(portfolio) || undefined,
+        pressKitUrl: normalizeUrl(pressKit) || undefined,
       });
 
       setUploading(false);
@@ -244,7 +258,7 @@ export function DemoUploadScreen() {
       <CyberBackground showArtwork={false} />
 
       {/* Screen Header Bar */}
-      <View style={[styles.headerBar, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.headerBar, { paddingTop: insets.top + 14 }]}>
         <Pressable onPress={() => nav.goBack()} style={styles.backBtnTouch} accessibilityRole="button">
           <CyberCutBox
             cutSize={8}
@@ -266,7 +280,8 @@ export function DemoUploadScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
@@ -475,7 +490,9 @@ export function DemoUploadScreen() {
             <Text style={[styles.counterText, { color: colors.muted2 }]}>{selectedTags.length} selected</Text>
           </View>
           <View style={styles.pillsWrap}>
-            {TAGS_LIST.map((t) => {
+            {/* Custom tags the user typed in below stay listed here too (they aren't in the
+                preset list), so they can see and untoggle them the same way as any other tag. */}
+            {[...TAGS_LIST, ...selectedTags.filter((t) => !TAGS_LIST.includes(t))].map((t) => {
               const active = selectedTags.includes(t);
               return (
                 <Pressable key={t} onPress={() => toggleTag(t)} accessibilityRole="button">
@@ -505,6 +522,35 @@ export function DemoUploadScreen() {
                 </Pressable>
               );
             })}
+          </View>
+
+          {/* Add your own tag — the preset list is a starting point, not the only option. */}
+          <View style={styles.customTagRow}>
+            <CyberCutBox
+              cutSize={8}
+              radius={4}
+              fill={colors.inputFill}
+              borderColor={colors.inputBorder}
+              borderWidth={1}
+              style={[styles.inputCutBox, styles.customTagInputCut]}
+            >
+              <TextInput
+                value={customTag}
+                onChangeText={setCustomTag}
+                placeholder="Add your own tag"
+                placeholderTextColor={colors.muted2}
+                autoCapitalize="characters"
+                onSubmitEditing={addCustomTag}
+                style={[styles.textInput, { color: colors.text }]}
+              />
+            </CyberCutBox>
+            <Pressable onPress={addCustomTag} accessibilityRole="button" accessibilityLabel="Add tag" style={styles.customTagAddBtn}>
+              <CyberCutBox gradient cutSize={6} radius={4} style={styles.customTagAddCut}>
+                <View style={styles.customTagAddInner}>
+                  <Text style={styles.activePillText}>ADD</Text>
+                </View>
+              </CyberCutBox>
+            </Pressable>
           </View>
         </View>
 
@@ -547,7 +593,7 @@ export function DemoUploadScreen() {
               <TextInput
                 value={portfolio}
                 onChangeText={setPortfolio}
-                placeholder="kaimercer.dev"
+                placeholder="ahmedraza.dev"
                 placeholderTextColor={colors.muted2}
                 autoCapitalize="none"
                 style={[styles.textInput, { color: colors.text }]}
@@ -583,7 +629,7 @@ export function DemoUploadScreen() {
             <Text style={[styles.fieldLabel, { color: colors.muted }]}>SCREENSHOTS</Text>
             <Text style={[styles.counterText, { color: colors.muted2 }]}>{screenshots.length}/5</Text>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsRow}>
+          <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsRow}>
             {screenshots.map((uri) => (
               <View key={uri} style={styles.screenshotThumbWrap}>
                 <Image source={{ uri }} style={styles.screenshotThumbImg} resizeMode="cover" />
@@ -597,7 +643,7 @@ export function DemoUploadScreen() {
                 <Ionicons name="add" size={22} color={colors.primary} />
               </Pressable>
             ) : null}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
 
         {/* Upload Progress & Errors */}
@@ -614,7 +660,7 @@ export function DemoUploadScreen() {
         ) : null}
 
         {failed ? <InlineErrorText message={failed} /> : null}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Section 9: Sticky Bottom Action Bar */}
       <View style={[styles.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.surface, borderTopColor: colors.cardBorder }]}>
@@ -666,7 +712,7 @@ export function DemoUploadScreen() {
             style={styles.modalContent}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>Select Genre</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
+            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 300 }}>
               {GENRES_LIST.map((g) => (
                 <Pressable
                   key={g}
@@ -682,7 +728,7 @@ export function DemoUploadScreen() {
                   {genre === g ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
                 </Pressable>
               ))}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </CyberCutBox>
         </Pressable>
       </Modal>
@@ -699,7 +745,7 @@ export function DemoUploadScreen() {
             style={styles.modalContent}
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>Select Engine</Text>
-            <ScrollView style={{ maxHeight: 300 }}>
+            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 300 }}>
               {ENGINES_LIST.map((e) => (
                 <Pressable
                   key={e}
@@ -715,7 +761,7 @@ export function DemoUploadScreen() {
                   {engine === e ? <Ionicons name="checkmark" size={18} color={colors.primary} /> : null}
                 </Pressable>
               ))}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           </CyberCutBox>
         </Pressable>
       </Modal>
@@ -732,8 +778,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 14,
-    gap: 12,
+    paddingBottom: 20,
+    gap: 14,
   },
   backBtnTouch: {
     width: 38,
@@ -750,26 +796,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitleWrap: {
-    gap: 2,
+    gap: 5,
   },
   headerTitle: {
     fontFamily: fonts.display,
-    fontSize: 22,
+    fontSize: 27,
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.5,
   },
   headerSubtitle: {
     fontFamily: fonts.mono,
-    fontSize: 9.5,
+    fontSize: 10.5,
     fontWeight: '700',
     color: '#00F0FF',
-    letterSpacing: 0.8,
+    letterSpacing: 0.9,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    gap: 16,
+    paddingTop: 14,
+    gap: 18,
   },
   proBanner: { borderRadius: 6, overflow: 'hidden' },
   proBannerGradient: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
@@ -929,6 +975,11 @@ const styles = StyleSheet.create({
     color: '#8E9BB5',
     letterSpacing: 0.5,
   },
+  customTagRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  customTagInputCut: { flex: 1, width: undefined, height: 40 },
+  customTagAddBtn: { width: 68, height: 40 },
+  customTagAddCut: { width: '100%', height: '100%' },
+  customTagAddInner: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   screenshotsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   screenshotThumbWrap: { width: 90, height: 60, borderRadius: 6, overflow: 'hidden', position: 'relative' },
   screenshotThumbImg: { width: '100%', height: '100%' },

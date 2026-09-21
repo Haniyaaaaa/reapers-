@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Dimensions, FlatList, Image, ImageSourcePropType, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, FlatList, Image, ImageSourcePropType, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CyberCutBox } from '../cyber/CyberCutBox';
 import { InlineErrorText } from '../feedback/InlineErrorText';
 import { ConfirmSheet } from '../feedback/ConfirmSheet';
 import { LoadMoreButton } from '../feedback/LoadMoreButton';
-import { getCyberAvatarSource } from '../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../data/cyberAvatars';
 import { useAuth } from '../../hooks/useAuth';
 import { usePostsStore } from '../../store/postsStore';
 import { EMPTY_ARRAY } from '../../utils/emptyArray';
@@ -14,8 +13,32 @@ import { subscribeToPostComments, subscribeToPostReactions } from '../../service
 import { submitReport } from '../../services/supabase/reports';
 import { fonts, useTheme } from '../../theme';
 import type { PostComment } from '../../types/post';
+import { CutAvatar } from '../avatars/CutAvatar';
+import { EmojiPickerTray } from '../chat/EmojiPickerTray';
+import { GifPickerTray } from '../chat/GifPickerTray';
+import { encodeGifComment, parseGifComment } from '../../utils/commentGif';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
 
 const SHEET_HEIGHT = Math.round(Dimensions.get('window').height * 0.82);
+
+/** A GIF that fails to load (dead link, rate limit) shows a tap-to-retry box instead of nothing. */
+function CommentGif({ uri, borderColor, iconColor }: { uri: string; borderColor: string; iconColor: string }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  if (failed) {
+    return (
+      <Pressable
+        onPress={() => { setFailed(false); setAttempt((a) => a + 1); }}
+        style={[styles.commentGif, styles.commentGifFailed, { borderColor }]}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading GIF"
+      >
+        <Ionicons name="refresh" size={18} color={iconColor} />
+      </Pressable>
+    );
+  }
+  return <Image key={attempt} source={{ uri }} style={styles.commentGif} resizeMode="cover" onError={() => setFailed(true)} />;
+}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -38,6 +61,7 @@ export function PostCommentsSheet({
   const { colors, light } = useTheme();
   const isLight = light;
   const { user } = useAuth();
+  const userId = user?.id;
   const insets = useSafeAreaInsets();
 
   const sheetBg = isLight ? colors.surface : '#0E1423';
@@ -78,20 +102,31 @@ export function PostCommentsSheet({
   const [deleteCommentId, setDeleteCommentId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [tray, setTray] = useState<'none' | 'emoji' | 'gif'>('none');
 
   useEffect(() => {
     if (postId) fetchComments(postId);
+    setTray('none');
   }, [postId, fetchComments]);
 
   useEffect(() => {
     if (!postId) return;
     const unsubComments = subscribeToPostComments(postId, handleRealtimeComment);
-    const unsubReactions = user ? subscribeToPostReactions(postId, () => fetchFeed(user.id)) : () => undefined;
+    // A burst of reactions collapses into ONE trailing feed refetch (the last state always lands)
+    // instead of a full-feed request per event.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubReactions = userId
+      ? subscribeToPostReactions(postId, () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => fetchFeed(userId), 600);
+        })
+      : () => undefined;
     return () => {
+      if (timer) clearTimeout(timer);
       unsubComments();
       unsubReactions();
     };
-  }, [postId, handleRealtimeComment, fetchFeed, user]);
+  }, [postId, handleRealtimeComment, fetchFeed, userId]);
 
   const submit = async () => {
     if (!user || !postId) return;
@@ -105,6 +140,27 @@ export function PostCommentsSheet({
       setText(body);
       setErr(e instanceof Error ? e.message : 'Could not post comment — try again.');
     }
+  };
+
+  const sendGif = async (uri: string) => {
+    if (!user || !postId) return;
+    setTray('none');
+    setErr('');
+    try {
+      await addComment(postId, user.id, encodeGifComment(uri));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not post GIF — try again.');
+    }
+  };
+
+  // One post at a time; `posting` drives the "Posting…" status line so it never looks like nothing happened.
+  const { run: runSubmit, pending: postingText } = useSingleFlight(submit);
+  const { run: runSendGif, pending: postingGif } = useSingleFlight(sendGif);
+  const posting = postingText || postingGif;
+
+  const toggleTray = (next: 'emoji' | 'gif') => {
+    Keyboard.dismiss();
+    setTray((t) => (t === next ? 'none' : next));
   };
 
   const submitReportReason = (reason: string) => {
@@ -123,23 +179,22 @@ export function PostCommentsSheet({
     setEditingCommentId(null);
   };
 
-  const renderComment = ({ item }: { item: PostComment }) => (
+  const renderComment = ({ item }: { item: PostComment }) => {
+    const gifUri = parseGifComment(item.text);
+    return (
     <View style={styles.commentRow}>
-      <View style={styles.commentAvatarWrap}>
-        <Image
-          source={item.avatarUri ? { uri: item.avatarUri } : getCyberAvatarSource(item.avatarId)}
-          style={styles.commentAvatarImg}
-        />
-      </View>
+      <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId)} size={32} cut={8} borderWidth={1} />
       <View style={styles.commentBody}>
         <View style={styles.commentUserRow}>
           <Text style={[styles.commentUser, { color: commentUserColor }]}>{item.userName}</Text>
           <Text style={[styles.commentTime, { color: commentTimeColor }]}>{formatTime(item.createdAt)}</Text>
           {item.userId === user?.id ? (
             <View style={styles.commentOwnActions}>
-              <Pressable onPress={() => startEditingComment(item)} hitSlop={8}>
-                <Ionicons name="create-outline" size={16} color={isLight ? colors.primary : '#00E5FF'} />
-              </Pressable>
+              {gifUri ? null : (
+                <Pressable onPress={() => startEditingComment(item)} hitSlop={8}>
+                  <Ionicons name="create-outline" size={16} color={isLight ? colors.primary : '#00E5FF'} />
+                </Pressable>
+              )}
               <Pressable onPress={() => setDeleteCommentId(item.id)} hitSlop={8}>
                 <Ionicons name="trash-outline" size={16} color="#FF4D6D" />
               </Pressable>
@@ -177,12 +232,15 @@ export function PostCommentsSheet({
               </Pressable>
             </View>
           </View>
+        ) : gifUri ? (
+          <CommentGif uri={gifUri} borderColor={inputBorder} iconColor={iconColor} />
         ) : (
           <Text style={[styles.commentText, { color: commentTextColor }]}>{item.text}</Text>
         )}
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <Modal visible={!!postId} transparent animationType="slide" onRequestClose={onClose}>
@@ -215,6 +273,7 @@ export function PostCommentsSheet({
             ) : null}
 
             <FlatList
+              keyboardShouldPersistTaps="handled"
               data={comments}
               keyExtractor={(c) => c.id}
               renderItem={renderComment}
@@ -223,47 +282,57 @@ export function PostCommentsSheet({
               ListFooterComponent={<LoadMoreButton hasMore={hasMore} onPress={() => postId && loadMoreComments(postId)} />}
             />
 
+            {posting ? <Text style={[styles.postingText, { color: iconColor }]}>Posting…</Text> : null}
             {err ? <InlineErrorText message={err} /> : null}
+
+            {tray === 'emoji' ? (
+              <View style={styles.trayWrap}>
+                <EmojiPickerTray onPick={(e) => setText((t) => t + e)} onClose={() => setTray('none')} />
+              </View>
+            ) : null}
+            {tray === 'gif' ? (
+              <View style={styles.trayWrap}>
+                <GifPickerTray onPick={runSendGif} onClose={() => setTray('none')} />
+              </View>
+            ) : null}
 
             <View style={[styles.composerRow, { borderTopColor: dividerBorder, paddingBottom: Math.max(12, insets.bottom) }]}>
               <View style={styles.composerAvatarWrap}>
                 <Image source={userAvatarSource} style={styles.composerAvatarImg} />
               </View>
 
-              <CyberCutBox
-                cutSize={10}
-                radius={6}
-                fill={inputBg}
-                borderColor={inputBorder}
-                borderWidth={0.88}
-                style={styles.inputCutBox}
-              >
+              {/* Same dock as chat: rounded pill field, emoji + GIF buttons, send circle once there's text */}
+              <View style={[styles.inputPill, { backgroundColor: inputBg, borderColor: inputBorder }]}>
                 <TextInput
                   value={text}
                   onChangeText={setText}
+                  onFocus={() => setTray('none')}
                   placeholder="Add a comment"
                   placeholderTextColor={placeholderColor}
                   style={[styles.textInput, { color: inputTextColor }]}
                   maxLength={1000}
-                  onSubmitEditing={submit}
+                  onSubmitEditing={runSubmit}
                 />
-              </CyberCutBox>
+              </View>
 
-              <Pressable onPress={submit} disabled={!text.trim()} style={styles.sendBtnWrap} accessibilityRole="button">
-                <CyberCutBox
-                  gradient={!!text.trim()}
-                  fill={text.trim() ? undefined : inputBg}
-                  borderColor={text.trim() ? undefined : inputBorder}
-                  borderWidth={text.trim() ? 0 : 0.88}
-                  cutSize={8}
-                  radius={4}
-                  style={styles.sendCutBox}
-                >
-                  <View style={styles.sendInner}>
-                    <Ionicons name="send" size={16} color={text.trim() ? '#FFFFFF' : placeholderColor} />
+              {text.trim() ? (
+                <Pressable onPress={runSubmit} style={styles.sendBtnWrap} accessibilityRole="button" accessibilityLabel="Post comment">
+                  <View style={[styles.sendCircle, { backgroundColor: colors.electricAccent }]}>
+                    <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
                   </View>
-                </CyberCutBox>
-              </Pressable>
+                </Pressable>
+              ) : (
+                <>
+                  <Pressable onPress={() => toggleTray('emoji')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="Emoji">
+                    <Ionicons name="happy-outline" size={23} color={tray === 'emoji' ? '#D83CFF' : inputTextColor} />
+                  </Pressable>
+                  <Pressable onPress={() => toggleTray('gif')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="GIF">
+                    <View style={[styles.gifBadge, { borderColor: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>
+                      <Text style={[styles.gifBadgeText, { color: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>GIF</Text>
+                    </View>
+                  </Pressable>
+                </>
+              )}
             </View>
           </KeyboardAvoidingView>
         </Pressable>
@@ -365,9 +434,15 @@ const styles = StyleSheet.create({
   },
   composerAvatarWrap: { width: 34, height: 34, borderRadius: 17, overflow: 'hidden' },
   composerAvatarImg: { width: '100%', height: '100%' },
-  inputCutBox: { flex: 1, height: 42 },
-  textInput: { flex: 1, height: '100%', paddingHorizontal: 14, fontFamily: fonts.body, fontSize: 13.5, color: '#FFFFFF' },
-  sendBtnWrap: { width: 40, height: 40 },
-  sendCutBox: { width: 40, height: 40 },
-  sendInner: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  inputPill: { flex: 1, height: 42, borderRadius: 21, borderWidth: 1, paddingHorizontal: 16, justifyContent: 'center' },
+  textInput: { fontFamily: fonts.body, fontSize: 14, color: '#FFFFFF', paddingVertical: 0 },
+  dockIconBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  gifBadge: { borderWidth: 1.5, borderRadius: 5, paddingHorizontal: 4, paddingVertical: 1 },
+  gifBadgeText: { fontFamily: fonts.bodySemi, fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  sendBtnWrap: { width: 34, height: 34 },
+  sendCircle: { width: '100%', height: '100%', borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
+  postingText: { fontFamily: fonts.bodyMed, fontSize: 12, paddingHorizontal: 16, paddingBottom: 4 },
+  trayWrap: { paddingHorizontal: 12, paddingTop: 8 },
+  commentGif: { width: 180, aspectRatio: 1.3, borderRadius: 10, marginTop: 6 },
+  commentGifFailed: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 });

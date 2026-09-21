@@ -1,10 +1,15 @@
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AvatarRing } from '../avatars/AvatarRing';
 import { fonts, radius, useTheme } from '../../theme';
 import type { Chatroom } from '../../types/chat';
+import { KeyboardAwareScrollView } from '../../components/layout/KeyboardAwareScrollView';
+import { useAuth } from '../../hooks/useAuth';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../hooks/useServerSearch';
+import { listVisibleChatrooms } from '../../services/supabase/chat';
 
 type Target = { id: string; name: string; subtitle: string; avatarId?: string; logo?: Chatroom['logo'] };
 
@@ -41,6 +46,18 @@ export function ForwardSendTo({
         })),
     [rooms, excludeRoomId],
   );
+
+  // Rooms you've joined that aren't in the loaded (most-recent) page still turn up when searching.
+  const { user } = useAuth();
+  const dq = useDebouncedValue(q);
+  const roomSearch = useServerSearch(
+    dq,
+    async (n) => (await listVisibleChatrooms(user?.id ?? '', 0, 40, n)).rows.filter((r) => r.joined),
+    { enabled: visible && !!user?.id },
+  );
+  const extra: Target[] = (roomSearch.results ?? [])
+    .filter((r) => r.id !== excludeRoomId && !rooms.some((x) => x.id === r.id))
+    .map((r) => ({ id: r.id, name: r.name, subtitle: r.lastMessage || r.description, logo: r.logo }));
 
   const needle = q.trim().toLowerCase();
   const filter = (list: Target[]) => list.filter((t) => !needle || t.name.toLowerCase().includes(needle) || t.subtitle.toLowerCase().includes(needle));
@@ -104,7 +121,7 @@ export function ForwardSendTo({
           />
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 88, gap: 16 }}>
+        <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 88, gap: 16 }}>
           <View style={[styles.card, { backgroundColor: colors.surface }]}>
             <Text style={[styles.kicker, { color: colors.muted }]}>Frequently contacted</Text>
             {filter(frequent).map((item) => (
@@ -113,11 +130,11 @@ export function ForwardSendTo({
           </View>
           <View style={[styles.card, { backgroundColor: colors.surface }]}>
             <Text style={[styles.kicker, { color: colors.muted }]}>Recent chats</Text>
-            {filter(recent).map((item) => (
+            {[...filter(recent), ...extra].map((item) => (
               <Row key={item.id} item={item} />
             ))}
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {picked.length > 0 ? (
           <View style={[styles.bottom, { backgroundColor: colors.charcoal, paddingBottom: Math.max(insets.bottom, 12) }]}>

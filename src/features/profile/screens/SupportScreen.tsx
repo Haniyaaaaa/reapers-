@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { BladeCard } from '../../../components/cards/BladeCard';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
@@ -31,6 +32,10 @@ export function SupportScreen() {
     if (user) fetchMyTickets(user.id);
   }, [user, fetchMyTickets]);
 
+  const refreshControl = useRefreshControl(async () => {
+    if (user) await fetchMyTickets(user.id);
+  });
+
   const submit = async () => {
     if (!subject.trim() || !message.trim() || !user) {
       setErr('Add a subject and a message.');
@@ -51,7 +56,7 @@ export function SupportScreen() {
   };
 
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title="Support" onBack={() => nav.goBack()} />
 
       <Text style={[styles.h, { color: colors.text }]}>New ticket</Text>

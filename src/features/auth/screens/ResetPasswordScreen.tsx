@@ -8,6 +8,8 @@ import { AuthTextField } from '../../../components/inputs/AuthTextField';
 import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
 import { useAuth } from '../../../hooks/useAuth';
+import { useSingleFlight } from '../../../hooks/useSingleFlight';
+import { parseRateLimitSeconds } from '../../../utils/authRateLimit';
 import { fonts, space, useTheme } from '../../../theme';
 
 const RESEND_COOLDOWN_SEC = 30;
@@ -58,15 +60,24 @@ export function ResetPasswordScreen() {
       setResent(true);
       setCooldown(RESEND_COOLDOWN_SEC);
     } catch (e) {
-      setCodeErr(e instanceof Error ? e.message : 'Could not resend code');
+      const message = e instanceof Error ? e.message : 'Could not resend code';
+      setCodeErr(message);
+      // Supabase's own rate limit can outlast our guessed cooldown — sync the countdown to
+      // the real wait it just told us about so the button doesn't re-enable before it will
+      // actually work again.
+      const realWait = parseRateLimitSeconds(message);
+      if (realWait) setCooldown(realWait);
     }
   };
+
+  const { run: runResend, pending: resending } = useSingleFlight(resend);
 
   return (
     <Screen footerPad={false}>
       <ScreenHeader title="Enter code" onBack={() => nav.goBack()} />
       <Text style={[styles.body, { color: colors.muted }]}>
         We sent a 6-digit code to <Text style={[styles.bold, { color: colors.text }]}>{params.email}</Text>.
+        {'\n'}Can't find it? Check your spam or junk folder.
       </Text>
       <View style={{ height: space.lg }} />
       <AuthTextField
@@ -83,9 +94,9 @@ export function ResetPasswordScreen() {
       />
       <CyberButton label="Verify code" onPress={submit} loading={submitting} disabled={submitting} />
       {resent ? <Text style={[styles.resentNote, { color: colors.online }]}>Code resent.</Text> : null}
-      <Pressable onPress={resend} disabled={cooldown > 0} style={styles.linkWrap} accessibilityRole="button">
+      <Pressable onPress={runResend} disabled={cooldown > 0 || resending} style={styles.linkWrap} accessibilityRole="button">
         <Text style={[styles.link, { color: colors.primary }, cooldown > 0 && { color: colors.muted2 }]}>
-          {cooldown > 0 ? `Resend code (${cooldown}s)` : 'Resend code'}
+          {resending ? 'Sending…' : cooldown > 0 ? `Resend code (${cooldown}s)` : 'Resend code'}
         </Text>
       </Pressable>
     </Screen>

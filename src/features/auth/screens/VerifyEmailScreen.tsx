@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -23,7 +22,10 @@ import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberButton } from '../../../components/cyber/CyberButton';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { useAuth } from '../../../hooks/useAuth';
+import { useSingleFlight } from '../../../hooks/useSingleFlight';
+import { parseRateLimitSeconds } from '../../../utils/authRateLimit';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 40, 400);
@@ -76,9 +78,17 @@ export function VerifyEmailScreen() {
       setErr('');
       setCooldown(RESEND_COOLDOWN_SEC);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not resend code');
+      const message = e instanceof Error ? e.message : 'Could not resend code';
+      setErr(message);
+      // Supabase's own rate limit can outlast our guessed cooldown — sync the countdown to
+      // the real wait it just told us about so the button doesn't re-enable before it will
+      // actually work again.
+      const realWait = parseRateLimitSeconds(message);
+      if (realWait) setCooldown(realWait);
     }
   };
+
+  const { run: runResend, pending: resending } = useSingleFlight(resend);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -92,7 +102,7 @@ export function VerifyEmailScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          <ScrollView
+          <KeyboardAwareScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -132,6 +142,9 @@ export function VerifyEmailScreen() {
                 <Text style={[styles.subtitle, { color: colors.muted }]}>
                   Please enter the code that we sent to you on{'\n'}
                   <Text style={[styles.emailHighlight, { color: colors.text }]}>{email}</Text>
+                </Text>
+                <Text style={[styles.subtitle, { color: colors.muted, marginTop: 10 }]}>
+                  Can't find it? Check your spam or junk folder.
                 </Text>
               </View>
 
@@ -216,8 +229,8 @@ export function VerifyEmailScreen() {
               <View style={styles.resendRow}>
                 <Text style={[styles.resendPrompt, { color: colors.muted }]}>Didn't get? </Text>
                 <Pressable
-                  onPress={resend}
-                  disabled={cooldown > 0}
+                  onPress={runResend}
+                  disabled={cooldown > 0 || resending}
                   accessibilityRole="button"
                   hitSlop={8}
                 >
@@ -228,12 +241,12 @@ export function VerifyEmailScreen() {
                       cooldown > 0 && styles.resendDisabled,
                     ]}
                   >
-                    {cooldown > 0 ? `Send me a new code (${cooldown}s)` : 'Send me a new code'}
+                    {resending ? 'Sending…' : cooldown > 0 ? `Send me a new code (${cooldown}s)` : 'Send me a new code'}
                   </Text>
                 </Pressable>
               </View>
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>

@@ -71,6 +71,8 @@ export const demos: Demo[] = [
     externalUrl: 'https://store.steampowered.com/app/thetan-arena',
     isJamEntry: false,
     createdAt: '2026-01-01T00:00:00.000Z',
+    tags: [],
+    platforms: [],
   },
   {
     id: 'd2',
@@ -87,6 +89,8 @@ export const demos: Demo[] = [
     externalUrl: 'https://www.fortnite.com',
     isJamEntry: false,
     createdAt: '2026-01-01T00:00:00.000Z',
+    tags: [],
+    platforms: [],
   },
   {
     id: 'd3',
@@ -103,6 +107,8 @@ export const demos: Demo[] = [
     externalUrl: 'https://reapers.app/demos/d3',
     isJamEntry: true,
     createdAt: '2026-01-01T00:00:00.000Z',
+    tags: [],
+    platforms: [],
   },
 ];
 
@@ -227,6 +233,7 @@ export const communities: Community[] = [
     memberCount: 2480,
     joined: false,
     location: 'Lahore, PK',
+    tags: [],
   },
   {
     id: 'com-pgda',
@@ -238,6 +245,7 @@ export const communities: Community[] = [
     memberCount: 1860,
     joined: false,
     location: 'Pakistan',
+    tags: [],
   },
   {
     id: 'com-igda',
@@ -249,6 +257,7 @@ export const communities: Community[] = [
     memberCount: 3120,
     joined: false,
     location: 'Lahore, PK',
+    tags: [],
   },
   {
     id: 'com-pakgamedev',
@@ -260,6 +269,7 @@ export const communities: Community[] = [
     memberCount: 2140,
     joined: false,
     location: 'Pakistan',
+    tags: [],
   },
   {
     id: 'com-pigd',
@@ -271,6 +281,7 @@ export const communities: Community[] = [
     memberCount: 940,
     joined: false,
     location: 'Pakistan',
+    tags: [],
   },
 ];
 

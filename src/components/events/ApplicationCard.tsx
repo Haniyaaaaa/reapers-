@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { formatMoney } from '../../utils/money';
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AvatarRing } from '../avatars/AvatarRing';
 import { BladeCard } from '../cards/BladeCard';
 import { InlineErrorText } from '../feedback/InlineErrorText';
 import { getPaymentProofSignedUrl } from '../../services/supabase/storage';
 import { useProfilePreviewStore } from '../../store/profilePreviewStore';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
 import { fonts, radius, useTheme } from '../../theme';
 import type { EventPaymentApplication } from '../../types/event';
 
@@ -18,10 +20,11 @@ export function ApplicationCard({
 }: {
   application: EventPaymentApplication;
   accountLabel?: string;
-  onApprove: () => void;
+  onApprove: () => unknown;
   onReject: () => void;
 }) {
   const { colors } = useTheme();
+  const { run: runApprove, pending: approving } = useSingleFlight(onApprove);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [viewing, setViewing] = useState(false);
   const [loadErr, setLoadErr] = useState('');
@@ -48,6 +51,15 @@ export function ApplicationCard({
           {accountLabel ? <Text style={[styles.meta, { color: colors.muted }]}>{accountLabel}</Text> : null}
         </View>
       </View>
+      {/* What was bought — the host checks the transfer against this amount. */}
+      <View style={[styles.orderBox, { backgroundColor: colors.inputFill }]}>
+        <Text style={[styles.orderText, { color: colors.text }]}>
+          {application.quantity} × {application.planName ?? 'Ticket'}
+        </Text>
+        {application.totalAmount != null ? (
+          <Text style={[styles.orderTotal, { color: colors.cyan }]}>{formatMoney(application.totalAmount)}</Text>
+        ) : null}
+      </View>
       {loadErr ? <InlineErrorText message={loadErr} /> : null}
       {signedUrl ? (
         <Pressable onPress={() => setViewing(true)} accessibilityRole="button" accessibilityLabel="View payment screenshot">
@@ -55,10 +67,10 @@ export function ApplicationCard({
         </Pressable>
       ) : null}
       <View style={styles.actions}>
-        <Pressable onPress={onApprove} style={[styles.btn, { backgroundColor: colors.magenta }]} accessibilityRole="button">
-          <Text style={{ color: colors.onPrimary, fontFamily: fonts.bodySemi, fontSize: 13 }}>Approve</Text>
+        <Pressable onPress={runApprove} disabled={approving} style={[styles.btn, { backgroundColor: colors.magenta, opacity: approving ? 0.7 : 1 }]} accessibilityRole="button" accessibilityState={{ busy: approving }}>
+          <Text style={{ color: colors.onPrimary, fontFamily: fonts.bodySemi, fontSize: 13 }}>{approving ? 'Approving…' : 'Approve'}</Text>
         </Pressable>
-        <Pressable onPress={onReject} style={[styles.btn, { borderColor: colors.danger, borderWidth: 1 }]} accessibilityRole="button">
+        <Pressable onPress={onReject} disabled={approving} style={[styles.btn, { borderColor: colors.danger, borderWidth: 1 }]} accessibilityRole="button">
           <Text style={{ color: colors.danger, fontFamily: fonts.bodySemi, fontSize: 13 }}>Reject</Text>
         </Pressable>
       </View>
@@ -72,6 +84,9 @@ export function ApplicationCard({
 }
 
 const styles = StyleSheet.create({
+  orderBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, marginBottom: 10 },
+  orderText: { fontFamily: fonts.bodySemi, fontSize: 13.5 },
+  orderTotal: { fontFamily: fonts.monoBold, fontSize: 13 },
   card: { padding: 14, marginBottom: 10 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   name: { fontFamily: fonts.bodySemi, fontSize: 15 },

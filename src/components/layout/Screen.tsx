@@ -1,11 +1,12 @@
 import { ReactElement, ReactNode, useMemo } from 'react';
-import { RefreshControlProps, ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControlProps, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { space, useTheme } from '../../theme';
 import { OfflineBanner } from '../feedback/OfflineBanner';
 import { useOffline } from '../../hooks/useOffline';
 import { CyberBackground } from '../cyber/CyberBackground';
+import { KeyboardAwareScrollView } from '../../components/layout/KeyboardAwareScrollView';
 
 type Props = {
   children: ReactNode;
@@ -28,13 +29,14 @@ export function Screen({ children, scroll = true, padded = true, footerPad = tru
       <CyberBackground />
       {offline ? <OfflineBanner /> : null}
       {scroll ? (
-        <ScrollView
+        <KeyboardAwareScrollView
           contentContainerStyle={[pad, { paddingTop: insets.top + 12 }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={refreshControl}
         >
           {children}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       ) : (
         <View style={[styles.fill, pad, { paddingTop: insets.top + 12 }]}>{children}</View>
       )}

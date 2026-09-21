@@ -1,35 +1,31 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Animated,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSwipeToDismiss } from '../../hooks/useSwipeToDismiss';
+import { GlassSurface } from '../glass/GlassSurface';
+import { SheetCloseButton } from '../glass/SheetCloseButton';
 import { fonts, useTheme } from '../../theme';
 import { CyberCutBox } from './CyberCutBox';
 
+/** Nothing is pre-selected: a null section means "don't filter on this". */
 export interface FilterState {
-  date: string;
-  location: string;
-  category: string;
-  /** ISO date string, only meaningful when date === 'CUSTOM'. */
-  customDate?: string;
-}
-
-const CUSTOM_DAYS_AHEAD = 21;
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function customDayLabel(d: Date, today: Date): string {
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-  return `${DAY_LABELS[d.getDay()]} ${d.getDate()}`;
+  date: string | null;
+  location: string | null;
+  category: string | null;
 }
 
 interface CyberFilterModalProps {
@@ -39,9 +35,10 @@ interface CyberFilterModalProps {
   initialFilters?: Partial<FilterState>;
 }
 
-const DATE_OPTIONS = ['THIS WEEK', 'TODAY', 'THIS MONTH', 'CUSTOM'];
-const LOCATION_OPTIONS = ['ANYWHERE', 'WITHIN 50KM', 'BERLIN', 'ONLINE'];
-const CATEGORY_OPTIONS = ['WATCH PARTY', 'MEETUP', 'TOURNAMENT', 'GAMEJAM'];
+const DATE_OPTIONS = ['THIS WEEK', 'TODAY', 'THIS MONTH'];
+const LOCATION_OPTIONS = ['ONLINE', 'ONSITE', 'HYBRID'];
+const PRESET_CATEGORIES = ['MEETUP', 'TOURNAMENT', 'GAMEJAM'];
+const CUSTOM = 'CUSTOM';
 
 export function CyberFilterModal({
   visible,
@@ -51,275 +48,169 @@ export function CyberFilterModal({
 }: CyberFilterModalProps) {
   const { colors, isLight } = useTheme();
   const insets = useSafeAreaInsets();
-  const [selectedDate, setSelectedDate] = useState(initialFilters?.date || 'TODAY');
-  const [selectedLocation, setSelectedLocation] = useState(initialFilters?.location || 'ANYWHERE');
-  const [selectedCategory, setSelectedCategory] = useState(initialFilters?.category || 'MEETUP');
-  const [selectedCustomDate, setSelectedCustomDate] = useState<Date>(
-    initialFilters?.customDate ? new Date(initialFilters.customDate) : new Date(),
-  );
+  const { panHandlers, sheetStyle } = useSwipeToDismiss(visible, onClose);
+  // The sheet never grows taller than the screen; the filter list scrolls in the room left after the
+  // header and the Apply buttons (~230pt).
+  const { height: winH } = useWindowDimensions();
+  const maxSheet = winH * 0.88;
+  const bodyMax = Math.max(180, maxSheet - 230);
+  const [selectedDate, setSelectedDate] = useState<string | null>(initialFilters?.date ?? null);
+  const [selectedLocation, setSelectedLocation] = useState<string | null>(initialFilters?.location ?? null);
+  // Category is one of the presets, or CUSTOM with the person's own typed category.
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [customCategory, setCustomCategory] = useState('');
+
+  useEffect(() => {
+    if (!visible) return;
+    setSelectedDate(initialFilters?.date ?? null);
+    setSelectedLocation(initialFilters?.location ?? null);
+    const cat = initialFilters?.category ?? null;
+    if (cat && !PRESET_CATEGORIES.includes(cat)) {
+      setSelectedCategory(CUSTOM);
+      setCustomCategory(cat);
+    } else {
+      setSelectedCategory(cat);
+      setCustomCategory('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const handleReset = () => {
-    setSelectedDate('TODAY');
-    setSelectedLocation('ANYWHERE');
-    setSelectedCategory('MEETUP');
-    setSelectedCustomDate(new Date());
+    setSelectedDate(null);
+    setSelectedLocation(null);
+    setSelectedCategory(null);
+    setCustomCategory('');
   };
 
   const handleApply = () => {
-    onApply({
-      date: selectedDate,
-      location: selectedLocation,
-      category: selectedCategory,
-      customDate: selectedDate === 'CUSTOM' ? selectedCustomDate.toISOString() : undefined,
-    });
+    const category = selectedCategory === CUSTOM ? customCategory.trim() || null : selectedCategory;
+    onApply({ date: selectedDate, location: selectedLocation, category });
     onClose();
   };
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const customDays = Array.from({ length: CUSTOM_DAYS_AHEAD }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    return d;
-  });
+  const idleFill = isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)';
+  const idleBorder = isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)';
+
+  // Tap a selected option again to clear that section.
+  const renderChips = (options: string[], selected: string | null, onSelect: (v: string | null) => void) => (
+    <View style={styles.chipGrid}>
+      {options.map((opt) => {
+        const active = selected === opt;
+        return (
+          <Pressable key={opt} onPress={() => onSelect(active ? null : opt)} style={styles.chipBtn} accessibilityRole="button" accessibilityState={{ selected: active }}>
+            <CyberCutBox
+              gradient={active}
+              cutSize={8}
+              radius={4}
+              fill={active ? undefined : idleFill}
+              borderColor={active ? undefined : idleBorder}
+              borderWidth={active ? 0 : 0.88}
+              style={styles.chipCut}
+            >
+              <View style={styles.chipInner}>
+                <Text style={[styles.chipText, { color: active ? '#FFFFFF' : isLight ? colors.text : '#8E9BB5' }, active && styles.chipTextActive]}>{opt}</Text>
+              </View>
+            </CyberCutBox>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={[styles.overlay, isLight && { backgroundColor: 'rgba(15, 23, 42, 0.45)' }]}>
-        {/* Backdrop press dismiss */}
         <Pressable style={styles.backdropPressable} onPress={onClose} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Animated.View onStartShouldSetResponder={() => true} style={[{ maxHeight: maxSheet }, sheetStyle]}>
+            <GlassSurface sheet radius={26} style={styles.modalBox}>
+              <View style={[styles.modalInner, { paddingBottom: Math.max(insets.bottom + 16, 20) }]}>
+                <View {...panHandlers}>
+                  <View style={styles.handleWrap}>
+                    <View style={[styles.handleBar, { backgroundColor: isLight ? 'rgba(15, 23, 42, 0.2)' : 'rgba(255, 255, 255, 0.25)' }]} />
+                  </View>
 
-        {/* Bottom Sheet Box */}
-        <CyberCutBox
-          cutSize={18}
-          radius={16}
-          fill={isLight ? colors.cardFill : 'rgba(9, 15, 28, 0.98)'}
-          borderColor={isLight ? colors.cardBorder : 'rgba(0, 229, 255, 0.55)'}
-          borderWidth={1}
-          glass
-          style={styles.modalBox}
-        >
-          <View style={[styles.modalInner, { paddingBottom: Math.max(insets.bottom + 16, 20) }]}>
-            {/* Handle Bar Indicator */}
-            <View style={styles.handleWrap}>
-              <View style={[styles.handleBar, { backgroundColor: isLight ? 'rgba(15, 23, 42, 0.2)' : 'rgba(255, 255, 255, 0.25)' }]} />
-            </View>
+                  <View style={styles.headerRow}>
+                    <View style={styles.titleWrap}>
+                      <Text style={[styles.titleText, { color: colors.text }]}>Filter</Text>
+                      <LinearGradient colors={['#00E5FF', '#D83CFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.accentLine} />
+                    </View>
 
-            {/* Header */}
-            <View style={styles.headerRow}>
-              <View style={styles.titleWrap}>
-                <Text style={[styles.titleText, { color: colors.text }]}>Filter</Text>
-                <LinearGradient
-                  colors={['#00E5FF', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.accentLine}
-                />
-              </View>
+                    <SheetCloseButton onPress={onClose} />
+                  </View>
+                </View>
 
-              <Pressable onPress={onClose} style={styles.closeBtn} accessibilityRole="button">
-                <CyberCutBox
-                  cutSize={6}
-                  radius={4}
-                  fill={isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)'}
-                  borderColor={isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.12)'}
-                  borderWidth={0.88}
-                  style={styles.closeCut}
-                >
-                  <Ionicons name="close" size={16} color={colors.text} />
-                </CyberCutBox>
-              </Pressable>
-            </View>
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: bodyMax }} contentContainerStyle={{ gap: 14 }}>
+                  <View style={styles.section}>
+                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>DATE</Text>
+                    {renderChips(DATE_OPTIONS, selectedDate, setSelectedDate)}
+                  </View>
 
-            {/* Section 1: DATE */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionLabel, { color: colors.muted }]}>DATE</Text>
-              <View style={styles.chipGrid}>
-                {DATE_OPTIONS.map((opt) => {
-                  const active = selectedDate === opt;
-                  return (
-                    <Pressable
-                      key={opt}
-                      onPress={() => setSelectedDate(opt)}
-                      style={styles.chipBtn}
-                      accessibilityRole="button"
-                    >
-                      <CyberCutBox
-                        gradient={active}
-                        cutSize={8}
-                        radius={4}
-                        fill={active ? undefined : (isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)')}
-                        borderColor={active ? undefined : (isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)')}
-                        borderWidth={active ? 0 : 0.88}
-                        style={styles.chipCut}
-                      >
-                        <View style={styles.chipInner}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: active ? '#FFFFFF' : (isLight ? colors.text : '#8E9BB5') },
-                              active && styles.chipTextActive,
-                            ]}
-                          >
-                            {opt}
-                          </Text>
-                        </View>
+                  <View style={styles.section}>
+                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>LOCATION</Text>
+                    {renderChips(LOCATION_OPTIONS, selectedLocation, setSelectedLocation)}
+                  </View>
+
+                  <View style={styles.section}>
+                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>CATEGORY</Text>
+                    {renderChips([...PRESET_CATEGORIES, CUSTOM], selectedCategory, setSelectedCategory)}
+                    {selectedCategory === CUSTOM ? (
+                      <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.customInputCut}>
+                        <TextInput
+                          value={customCategory}
+                          onChangeText={(v) => setCustomCategory(v.slice(0, 24))}
+                          placeholder="Type your own category"
+                          placeholderTextColor={colors.muted2}
+                          autoFocus
+                          autoCorrect={false}
+                          style={[styles.customInput, { color: colors.text }]}
+                        />
                       </CyberCutBox>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {selectedDate === 'CUSTOM' ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.customDateScroll} contentContainerStyle={{ gap: 8 }}>
-                  {customDays.map((d) => {
-                    const active = d.toDateString() === selectedCustomDate.toDateString();
-                    return (
-                      <Pressable key={d.toISOString()} onPress={() => setSelectedCustomDate(d)} accessibilityRole="button">
-                        <CyberCutBox
-                          gradient={active}
-                          cutSize={6}
-                          radius={4}
-                          fill={active ? undefined : (isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)')}
-                          borderColor={active ? undefined : (isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)')}
-                          borderWidth={active ? 0 : 0.88}
-                          style={styles.customDayCut}
-                        >
-                          <Text
-                            style={[
-                              styles.customDayText,
-                              { color: active ? '#FFFFFF' : (isLight ? colors.text : '#8E9BB5') },
-                              active && styles.chipTextActive,
-                            ]}
-                          >
-                            {customDayLabel(d, today)}
-                          </Text>
-                        </CyberCutBox>
-                      </Pressable>
-                    );
-                  })}
+                    ) : null}
+                  </View>
                 </ScrollView>
-              ) : null}
-            </View>
 
-            {/* Section 2: LOCATION */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionLabel, { color: colors.muted }]}>LOCATION</Text>
-              <View style={styles.chipGrid}>
-                {LOCATION_OPTIONS.map((opt) => {
-                  const active = selectedLocation === opt;
-                  return (
-                    <Pressable
-                      key={opt}
-                      onPress={() => setSelectedLocation(opt)}
-                      style={styles.chipBtn}
-                      accessibilityRole="button"
+                <View style={[styles.divider, { backgroundColor: isLight ? colors.border : 'rgba(255, 255, 255, 0.08)' }]} />
+
+                <View style={styles.footerRow}>
+                  <Pressable onPress={handleReset} style={styles.resetBtn} accessibilityRole="button">
+                    <CyberCutBox
+                      cutSize={8}
+                      radius={4}
+                      fill={idleFill}
+                      borderColor={isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.12)'}
+                      borderWidth={1}
+                      style={styles.resetCut}
                     >
-                      <CyberCutBox
-                        gradient={active}
-                        cutSize={8}
-                        radius={4}
-                        fill={active ? undefined : (isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)')}
-                        borderColor={active ? undefined : (isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)')}
-                        borderWidth={active ? 0 : 0.88}
-                        style={styles.chipCut}
-                      >
-                        <View style={styles.chipInner}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: active ? '#FFFFFF' : (isLight ? colors.text : '#8E9BB5') },
-                              active && styles.chipTextActive,
-                            ]}
-                          >
-                            {opt}
-                          </Text>
-                        </View>
-                      </CyberCutBox>
-                    </Pressable>
-                  );
-                })}
+                      <View style={styles.resetInner}>
+                        <Text style={[styles.resetText, { color: colors.text }]}>Reset</Text>
+                      </View>
+                    </CyberCutBox>
+                  </Pressable>
+
+                  <Pressable onPress={handleApply} style={styles.applyBtn} accessibilityRole="button">
+                    <CyberCutBox gradient cutSize={8} radius={4} style={styles.applyCut}>
+                      <View style={styles.applyInner}>
+                        <Text style={styles.applyText}>Show Results</Text>
+                      </View>
+                    </CyberCutBox>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-
-            {/* Section 3: CATEGORY */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionLabel, { color: colors.muted }]}>CATEGORY</Text>
-              <View style={styles.chipGrid}>
-                {CATEGORY_OPTIONS.map((opt) => {
-                  const active = selectedCategory === opt;
-                  return (
-                    <Pressable
-                      key={opt}
-                      onPress={() => setSelectedCategory(opt)}
-                      style={styles.chipBtn}
-                      accessibilityRole="button"
-                    >
-                      <CyberCutBox
-                        gradient={active}
-                        cutSize={8}
-                        radius={4}
-                        fill={active ? undefined : (isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)')}
-                        borderColor={active ? undefined : (isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.12)')}
-                        borderWidth={active ? 0 : 0.88}
-                        style={styles.chipCut}
-                      >
-                        <View style={styles.chipInner}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { color: active ? '#FFFFFF' : (isLight ? colors.text : '#8E9BB5') },
-                              active && styles.chipTextActive,
-                            ]}
-                          >
-                            {opt}
-                          </Text>
-                        </View>
-                      </CyberCutBox>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            <View style={[styles.divider, { backgroundColor: isLight ? colors.border : 'rgba(255, 255, 255, 0.08)' }]} />
-
-            {/* Action Buttons Footer */}
-            <View style={styles.footerRow}>
-              <Pressable onPress={handleReset} style={styles.resetBtn} accessibilityRole="button">
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill={isLight ? '#FFFFFF' : 'rgba(14, 20, 35, 0.85)'}
-                  borderColor={isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.12)'}
-                  borderWidth={1}
-                  style={styles.resetCut}
-                >
-                  <View style={styles.resetInner}>
-                    <Text style={[styles.resetText, { color: colors.text }]}>Reset</Text>
-                  </View>
-                </CyberCutBox>
-              </Pressable>
-
-              <Pressable onPress={handleApply} style={styles.applyBtn} accessibilityRole="button">
-                <CyberCutBox gradient cutSize={8} radius={4} style={styles.applyCut}>
-                  <View style={styles.applyInner}>
-                    <Text style={styles.applyText}>Show Results</Text>
-                  </View>
-                </CyberCutBox>
-              </Pressable>
-            </View>
-          </View>
-        </CyberCutBox>
+            </GlassSurface>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  customInputCut: { height: 42 },
+  customInput: { flex: 1, fontFamily: fonts.body, fontSize: 13, paddingHorizontal: 12, paddingVertical: 0 },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   backdropPressable: {
@@ -368,16 +259,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 2,
     borderRadius: 1,
-  },
-  closeBtn: {
-    width: 30,
-    height: 30,
-  },
-  closeCut: {
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   section: {
     gap: 8,

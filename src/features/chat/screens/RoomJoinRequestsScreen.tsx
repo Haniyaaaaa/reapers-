@@ -2,6 +2,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { AvatarRing } from '../../../components/avatars/AvatarRing';
 import { BladeCard } from '../../../components/cards/BladeCard';
@@ -25,8 +26,12 @@ export function RoomJoinRequestsScreen() {
     fetchJoinRequests(params.roomId);
   }, [params.roomId, fetchJoinRequests]);
 
+  const refreshControl = useRefreshControl(async () => {
+    await fetchJoinRequests(params.roomId);
+  });
+
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title="Join requests" onBack={() => nav.goBack()} />
       {requests.length === 0 ? <EmptyState title="No pending join requests." /> : null}
 

@@ -47,7 +47,7 @@ function userPartialToProfileUpdate(partial: Partial<User>): ProfileUpdate {
   if (partial.username !== undefined) update.username = partial.username;
   if (partial.displayName !== undefined) update.display_name = partial.displayName;
   if (partial.bio !== undefined) update.bio = partial.bio;
-  if (partial.avatarUri !== undefined) update.avatar_uri = partial.avatarUri ?? null;
+  if (partial.avatarUri !== undefined) update.avatar_uri = partial.avatarUri || null; // '' clears a removed custom photo
   if (partial.avatarId !== undefined) update.avatar_id = partial.avatarId ?? null;
   if (partial.avatarLook !== undefined) update.avatar_look = partial.avatarLook ?? null;
   if (partial.roles !== undefined) update.roles = partial.roles;

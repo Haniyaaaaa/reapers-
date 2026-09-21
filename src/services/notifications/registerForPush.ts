@@ -13,7 +13,7 @@ Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
     shouldShowList: true,
-    shouldPlaySound: false,
+    shouldPlaySound: true,
     shouldSetBadge: false,
   }),
 });
@@ -27,6 +27,19 @@ Notifications.setNotificationHandler({
  */
 export async function registerForPushNotifications(userId: string): Promise<string | null> {
   if (!Device.isDevice) return null; // push tokens aren't meaningful on simulators/web
+
+  // Android 8+ requires a notification channel for anything to display, and on Android 13+ the
+  // permission prompt itself doesn't appear until at least one channel exists — so this has to
+  // run before requestPermissionsAsync below. HIGH importance makes new-event pushes pop up as
+  // a heads-up banner instead of arriving silently in the tray.
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Reapers',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#00E5FF',
+    }).catch(() => undefined);
+  }
 
   const existing = await Notifications.getPermissionsAsync();
   let status = existing.status;

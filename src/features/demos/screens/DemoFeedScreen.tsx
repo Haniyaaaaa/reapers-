@@ -1,11 +1,11 @@
 import { useNavigation } from '@react-navigation/native';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -23,14 +23,17 @@ import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { Screen } from '../../../components/layout/Screen';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useDemoStore } from '../../../store/demoStore';
+import { STALE_MS } from '../../../store/swr';
 import { fonts, useTheme } from '../../../theme';
+import { DemoFilterSheet, EMPTY_DEMO_FILTERS, type DemoFilterSelection } from '../../../components/demos/DemoFilterSheet';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 type Nav = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList, 'DemosTab'>,
   NativeStackNavigationProp<MainStackParamList>
 >;
 
-const FILTERS = ['FOR YOU', 'TOP RATED', 'NEW', 'UNREAL', 'UNITY'] as const;
+const FILTERS = ['FOR YOU', 'TOP RATED', 'NEW'] as const;
 
 export function DemoFeedScreen() {
   const nav = useNavigation<Nav>();
@@ -46,40 +49,27 @@ export function DemoFeedScreen() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('FOR YOU');
   const [searchQuery, setSearchQuery] = useState('');
 
+  const [filters, setFilters] = useState<DemoFilterSelection>(EMPTY_DEMO_FILTERS);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const activeFilterCount = filters.genres.length + filters.engines.length + filters.platforms.length + filters.tags.length;
+
+  // Genre/engine/platform/tag filters are applied by the query itself (not just to whatever
+  // page is already loaded) so pagination and "load more" stay correct while filtered.
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
+  const load = (opts?: { ifStaleMs?: number }) => fetchDemos({ sort: filter === 'TOP RATED' ? 'top_rated' : 'new', ...filters, search: debouncedSearch }, opts);
+
   useEffect(() => {
-    if (filter === 'TOP RATED') {
-      fetchDemos({ sort: 'top_rated' });
-    } else {
-      fetchDemos({ sort: 'new' });
-    }
-  }, [filter, fetchDemos]);
+    load({ ifStaleMs: STALE_MS });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, filters, debouncedSearch, fetchDemos]);
 
   const refreshControl = useRefreshControl(async () => {
-    if (filter === 'TOP RATED') {
-      await fetchDemos({ sort: 'top_rated' });
-    } else {
-      await fetchDemos({ sort: 'new' });
-    }
+    await load();
   });
 
-  // Client-side search & engine filtering
+  // Client-side text search on top of the server-side filters
   const filteredList = useMemo(() => {
     let result = demos;
-    if (filter === 'UNREAL') {
-      result = result.filter(
-        (d) =>
-          d.description?.toLowerCase().includes('unreal') ||
-          d.genre?.toLowerCase().includes('unreal') ||
-          d.title?.toLowerCase().includes('unreal'),
-      );
-    } else if (filter === 'UNITY') {
-      result = result.filter(
-        (d) =>
-          d.description?.toLowerCase().includes('unity') ||
-          d.genre?.toLowerCase().includes('unity') ||
-          d.title?.toLowerCase().includes('unity'),
-      );
-    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -88,12 +78,14 @@ export function DemoFeedScreen() {
           d.title.toLowerCase().includes(q) ||
           d.developerName?.toLowerCase().includes(q) ||
           d.genre?.toLowerCase().includes(q) ||
-          d.description?.toLowerCase().includes(q),
+          d.description?.toLowerCase().includes(q) ||
+          (d.tags ?? []).some((t) => t.toLowerCase().includes(q)) ||
+          (d.platforms ?? []).some((p) => p.toLowerCase().includes(q)),
       );
     }
 
     return result;
-  }, [demos, filter, searchQuery]);
+  }, [demos, searchQuery]);
 
   return (
     <Screen refreshControl={refreshControl}>
@@ -148,7 +140,7 @@ export function DemoFeedScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search communities, demos, experts..."
+              placeholder="Search demos, developers, tags..."
               placeholderTextColor={colors.muted2}
               style={[styles.searchInput, { color: colors.text }]}
               autoCapitalize="none"
@@ -164,7 +156,7 @@ export function DemoFeedScreen() {
 
         {/* Options / Filter Sliders Button */}
         <Pressable
-          onPress={() => {}}
+          onPress={() => setFilterSheetOpen(true)}
           style={styles.filterOptionsBtn}
           accessibilityRole="button"
           accessibilityLabel="Filter options"
@@ -179,13 +171,19 @@ export function DemoFeedScreen() {
           >
             <View style={styles.filterBtnInner}>
               <Ionicons name="options-outline" size={20} color={isLight ? colors.primary : '#00F0FF'} />
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
             </View>
           </CyberCutBox>
         </Pressable>
       </View>
 
       {/* Filter Chips Horizontal Row */}
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterChipsRow}
@@ -225,7 +223,14 @@ export function DemoFeedScreen() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </KeyboardAwareScrollView>
+
+      <DemoFilterSheet
+        visible={filterSheetOpen}
+        value={filters}
+        onApply={setFilters}
+        onClose={() => setFilterSheetOpen(false)}
+      />
 
       {/* Section Header: Trending Demos */}
       <View style={styles.sectionHeaderWrap}>
@@ -248,12 +253,14 @@ export function DemoFeedScreen() {
         </View>
       ) : null}
 
-      {!loading && error ? <RetryBanner message={`Could not load. ${error}`} onRetry={() => fetchDemos()} /> : null}
+      {!loading && error ? <RetryBanner message={`Could not load. ${error}`} onRetry={() => load()} /> : null}
 
       {/* Empty State */}
       {!loading && !error && filteredList.length === 0 ? (
         <EmptyState
           title={searchQuery ? `No builds match "${searchQuery}"` : 'No demos found for this filter'}
+          actionLabel={activeFilterCount > 0 ? 'Clear filters' : undefined}
+          onAction={activeFilterCount > 0 ? () => setFilters(EMPTY_DEMO_FILTERS) : undefined}
         />
       ) : null}
 
@@ -283,6 +290,19 @@ export function DemoFeedScreen() {
 }
 
 const styles = StyleSheet.create({
+  filterBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#D83CFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { fontFamily: fonts.monoBold, fontSize: 9, color: '#FFFFFF' },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -367,7 +387,7 @@ const styles = StyleSheet.create({
   filterChipsRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingBottom: 16,
+    paddingBottom: 20,
   },
   chipPressable: {
     height: 34,
@@ -403,8 +423,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   sectionHeaderWrap: {
-    marginBottom: 16,
-    marginTop: 4,
+    marginBottom: 14,
+    marginTop: 8,
   },
   sectionTitleRow: {
     flexDirection: 'row',

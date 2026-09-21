@@ -1,9 +1,11 @@
 import { supabase } from './client';
 import type { BookingRow, ExpertInsert, ExpertRow, ExpertUpdate } from './types';
-import type { Expert } from '../../types/expert';
+import type { Expert, ExpertReview } from '../../types/expert';
 import type { BookingSummary, ExpertSlot } from '../../types/extra';
 import { dayKey, formatSlotTime, type WeeklyAvailability } from '../../utils/expertSlots';
 import { PAGE_SIZE, toPage, type Page } from './pagination';
+import { likePattern } from './searchText';
+import { EXPERTISE_TAGS } from '../../types/expert';
 
 const REVIEW_ALREADY_EXISTS = '23505';
 
@@ -49,6 +51,45 @@ export async function listVerifiedExperts(offset = 0, limit = PAGE_SIZE, special
   if (error) throw error;
   const page = toPage(data as unknown as ExpertRowWithProfile[] | null, limit);
   return { rows: page.rows.map(expertRowToExpert), hasMore: page.hasMore };
+}
+
+/** Server-side search across an expert's name (from their profile), title, company, bio and
+ * expertise tags, honouring the active specialty and self-exclusion. Best rated first. Two queries
+ * merged, because the name lives on `profiles` and can't share one `or()` with the expert columns. */
+export async function searchExperts(query: string, opts: { specialty?: string; excludeUserId?: string } = {}, limit = 30): Promise<Expert[]> {
+  const p = likePattern(query);
+  if (!p) return [];
+  const needle = query.trim().toLowerCase();
+  const tagMatches = EXPERTISE_TAGS.filter((t) => t.toLowerCase().includes(needle));
+  const clauses = [`role.ilike.${p}`, `company.ilike.${p}`, `bio.ilike.${p}`];
+  if (tagMatches.length) clauses.push(`specialties.ov.{${tagMatches.map((t) => `"${t}"`).join(',')}}`);
+
+  const base = () => {
+    let q = supabase.from('experts').select(EXPERT_SELECT).eq('verified', true);
+    if (opts.specialty) q = q.contains('specialties', [opts.specialty]);
+    if (opts.excludeUserId) q = q.neq('id', opts.excludeUserId);
+    return q;
+  };
+
+  const [{ data: byFields, error }, { data: nameMatches }] = await Promise.all([
+    base().or(clauses.join(',')).order('rating', { ascending: false }).limit(limit),
+    supabase.from('profiles').select('id').ilike('display_name', p).limit(50),
+  ]);
+  if (error) throw error;
+
+  let byName: ExpertRowWithProfile[] = [];
+  const ids = (nameMatches ?? []).map((r) => r.id);
+  if (ids.length) {
+    const { data } = await base().in('id', ids).order('rating', { ascending: false }).limit(limit);
+    byName = (data ?? []) as unknown as ExpertRowWithProfile[];
+  }
+
+  const merged = new Map<string, ExpertRowWithProfile>();
+  for (const row of [...((byFields ?? []) as unknown as ExpertRowWithProfile[]), ...byName]) merged.set(row.id, row);
+  return Array.from(merged.values())
+    .sort((a, b) => b.rating - a.rating)
+    .slice(0, limit)
+    .map(expertRowToExpert);
 }
 
 /** Real `count(*)`, replacing the header's old `experts.length * 10 || 290` fabrication —
@@ -279,4 +320,39 @@ export async function submitExpertReview(bookingId: string, expertId: string, re
     if (error.code === REVIEW_ALREADY_EXISTS) throw new Error("You've already rated this session.");
     throw new Error('Could not submit review — the session may not have ended yet.');
   }
+}
+
+/** Newest first. Anyone can read these (expert_reviews_select_all); the reviewer's name and
+ * avatar come from a second profiles lookup rather than a join, since expert_reviews has two
+ * FK paths to profiles-adjacent tables and PostgREST would need the same disambiguation
+ * listMyBookings does. */
+export async function listExpertReviews(expertId: string, limit = 30): Promise<ExpertReview[]> {
+  const { data, error } = await supabase
+    .from('expert_reviews')
+    .select('*')
+    .eq('expert_id', expertId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  const rows = data ?? [];
+  const reviewerIds = Array.from(new Set(rows.map((r) => r.reviewer_id)));
+  const authors = new Map<string, { display_name: string; avatar_uri: string | null; avatar_id: string | null }>();
+  if (reviewerIds.length) {
+    const { data: profiles } = await supabase.from('profiles').select('id, display_name, avatar_uri, avatar_id').in('id', reviewerIds);
+    for (const p of profiles ?? []) authors.set(p.id, p);
+  }
+  return rows.map((r) => {
+    const a = authors.get(r.reviewer_id);
+    return {
+      id: r.id,
+      expertId: r.expert_id,
+      reviewerId: r.reviewer_id,
+      reviewerName: a?.display_name ?? 'Someone',
+      reviewerAvatarUri: a?.avatar_uri ?? undefined,
+      reviewerAvatarId: a?.avatar_id ?? undefined,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.created_at,
+    };
+  });
 }

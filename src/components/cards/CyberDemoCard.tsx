@@ -7,11 +7,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { ClipPath, Defs, G, Image as SvgImage, LinearGradient as SvgGradient, Path, Rect, Stop } from 'react-native-svg';
 import { CyberCutBox } from '../cyber/CyberCutBox';
-import { DemoThumb } from '../media/DemoThumb';
 import { fonts, useTheme } from '../../theme';
 
+const CARD_W = 230;
+const BANNER_H = 124;
+const CUT = 18;
 
 interface CyberDemoCardProps {
   id: string;
@@ -39,28 +41,50 @@ export function CyberDemoCard({
   return (
     <Pressable onPress={onPress} style={styles.cardContainer} accessibilityRole="button">
       <CyberCutBox
-        cutSize={12}
-        radius={5}
-        fill="rgba(14, 20, 35, 0.85)"
+        cutSize={CUT}
+        radius={6}
+        fill={isLight ? colors.cardFill : 'rgba(18, 14, 36, 0.6)'}
+        borderColor={isLight ? colors.cardBorder : 'rgba(168, 85, 247, 0.2)'}
+        borderWidth={1}
+        glass
         style={styles.cutCard}
       >
         <View style={styles.cardInner}>
-          {/* Banner Graphic */}
+          {/* Banner — drawn in SVG so the image itself is clipped to the card's chamfer */}
           <View style={styles.imageWrap}>
-            {imageUri || imageSource ? (
-              <Image source={imageUri ? { uri: imageUri } : (imageSource as ImageSourcePropType)} style={styles.bannerImg} resizeMode="cover" />
-            ) : (
-              <DemoThumb style={styles.bannerImg} />
-            )}
-            <LinearGradient
-              colors={['rgba(9, 15, 28, 0.1)', 'rgba(9, 15, 28, 0.75)', '#090F1C']}
-              locations={[0, 0.7, 1]}
-              style={StyleSheet.absoluteFill}
-            />
+            <Svg width={CARD_W} height={BANNER_H} style={StyleSheet.absoluteFill}>
+              <Defs>
+                <ClipPath id="demoBannerClip">
+                  <Path d={`M ${CUT} 0 L ${CARD_W} 0 L ${CARD_W} ${BANNER_H} L 0 ${BANNER_H} L 0 ${CUT} Z`} />
+                </ClipPath>
+                <SvgGradient id="demoBannerShade" x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor="#090F1C" stopOpacity={0.1} />
+                  <Stop offset="0.7" stopColor="#0C1222" stopOpacity={0.7} />
+                  <Stop offset="1" stopColor="#0C1222" stopOpacity={0.95} />
+                </SvgGradient>
+                <SvgGradient id="demoBannerFallback" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#1B2A5C" />
+                  <Stop offset="1" stopColor="#3A1466" />
+                </SvgGradient>
+              </Defs>
+              <G clipPath="url(#demoBannerClip)">
+                {imageUri || imageSource ? (
+                  <SvgImage
+                    href={imageUri ? { uri: imageUri } : (imageSource as ImageSourcePropType)}
+                    width={CARD_W}
+                    height={BANNER_H}
+                    preserveAspectRatio="xMidYMid slice"
+                  />
+                ) : (
+                  <Rect width={CARD_W} height={BANNER_H} fill="url(#demoBannerFallback)" />
+                )}
+                <Rect width={CARD_W} height={BANNER_H} fill="url(#demoBannerShade)" />
+              </G>
+            </Svg>
 
             {badge ? (
               <View style={styles.badgeWrap}>
-                <Text style={styles.badgeText}>{badge}</Text>
+                <Text style={styles.badgeText} numberOfLines={1}>{badge}</Text>
               </View>
             ) : null}
           </View>
@@ -96,7 +120,7 @@ export function CyberDemoCard({
 
 const styles = StyleSheet.create({
   cardContainer: {
-    width: 200,
+    width: CARD_W,
     marginRight: 12,
   },
   cutCard: {
@@ -108,47 +132,46 @@ const styles = StyleSheet.create({
   },
   imageWrap: {
     width: '100%',
-    height: 105,
+    height: BANNER_H,
     position: 'relative',
     overflow: 'hidden',
   },
-  bannerImg: {
-    width: '100%',
-    height: '100%',
-  },
   badgeWrap: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(216, 60, 255, 0.35)',
+    top: 10,
+    right: 10,
+    maxWidth: CARD_W - 36,
+    backgroundColor: 'rgba(90, 40, 170, 0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(216, 60, 255, 0.6)',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    borderColor: 'rgba(190, 150, 255, 0.55)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   badgeText: {
     fontFamily: fonts.mono,
-    fontSize: 8.5,
+    fontSize: 9.5,
     fontWeight: '700',
-    color: '#D83CFF',
-    letterSpacing: 0.5,
+    color: '#E4D2FF',
+    letterSpacing: 0.9,
   },
   infoWrap: {
-    padding: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   titleText: {
     fontFamily: fonts.bodySemi,
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 2,
   },
   studioText: {
     fontFamily: fonts.body,
-    fontSize: 11,
+    fontSize: 12,
     color: '#8E9BB5',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   ratingRow: {
     flexDirection: 'row',

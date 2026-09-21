@@ -13,7 +13,7 @@ import { EmptyState } from '../../../components/feedback/EmptyState';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { usePostsStore } from '../../../store/postsStore';
@@ -21,6 +21,7 @@ import { DATE_BUCKETS, matchesDateBucket, type DateBucket } from '../../../utils
 import { fonts } from '../../../theme';
 import { useTheme } from '../../../theme/useTheme';
 import type { FeedPost, PostKind } from '../../../types/post';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
 
 function timeAgo(iso: string): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -181,12 +182,7 @@ export function MyPostsScreen() {
           >
             <View style={styles.postInner}>
               <View style={styles.headerRow}>
-                <View style={styles.avatarBox}>
-                  <Image
-                    source={post.authorAvatarUri ? { uri: post.authorAvatarUri } : getCyberAvatarSource(post.authorAvatarId)}
-                    style={styles.avatarImg}
-                  />
-                </View>
+                <CutAvatar source={resolveAvatarSource(post.authorAvatarUri, post.authorAvatarId)} size={42} cut={10} borderWidth={1} />
                 <View style={styles.authorInfo}>
                   <Text style={[styles.authorName, { color: colors.text }]}>{post.authorName}</Text>
                   <Text style={[styles.metaText, { color: colors.muted }]}>{timeAgo(post.createdAt)} ago</Text>

@@ -3,6 +3,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import { FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { EmptyState } from '../../../components/feedback/EmptyState';
 import { FilterChip } from '../../../components/inputs/FilterChip';
@@ -39,6 +40,12 @@ export function RoomMediaScreen() {
     if (tab === 'links') fetchRoomLinks(params.roomId);
   }, [tab, params.roomId, fetchRoomImages, fetchRoomVideos, fetchRoomLinks]);
 
+  const refreshControl = useRefreshControl(async () => {
+    if (tab === 'photos') await fetchRoomImages(params.roomId);
+    if (tab === 'videos') await fetchRoomVideos(params.roomId);
+    if (tab === 'links') await fetchRoomLinks(params.roomId);
+  });
+
   const images = media?.images ?? EMPTY_ARRAY;
   const videos = media?.videos ?? EMPTY_ARRAY;
   const links = media?.links ?? EMPTY_ARRAY;
@@ -74,6 +81,7 @@ export function RoomMediaScreen() {
         ) : (
           <FlatList
             style={{ flex: 1 }}
+            refreshControl={refreshControl}
             data={images}
             numColumns={3}
             keyExtractor={(m) => m.id}
@@ -90,6 +98,7 @@ export function RoomMediaScreen() {
         ) : (
           <FlatList
             style={{ flex: 1 }}
+            refreshControl={refreshControl}
             data={videos}
             numColumns={3}
             keyExtractor={(m) => m.id}
@@ -106,6 +115,7 @@ export function RoomMediaScreen() {
         ) : (
           <FlatList
             style={{ flex: 1 }}
+            refreshControl={refreshControl}
             data={links}
             keyExtractor={(l) => l.id}
             onEndReached={() => loadMoreRoomLinks(params.roomId)}

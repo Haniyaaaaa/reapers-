@@ -2,10 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +23,9 @@ import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { RetryBanner } from '../../../components/feedback/RetryBanner';
 import { Skeleton } from '../../../components/feedback/Skeleton';
+import { STALE_MS } from '../../../store/swr';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { listVisibleChatrooms } from '../../../services/supabase/chat';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
@@ -39,7 +40,9 @@ import type { PersonCard } from '../../../types/extra';
 import { brandLogo } from '../../../data/brand';
 import { communityLogos } from '../../../data/communityLogos';
 import { avatarUriFor } from '../../../data/gamerAvatars';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../../data/cyberAvatars';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -82,9 +85,10 @@ export function ChatDirectoryScreen() {
   const [connectionsLoading, setConnectionsLoading] = useState(false);
   const [connectionsHasMore, setConnectionsHasMore] = useState(false);
 
+  const userId = user?.id;
   useEffect(() => {
-    if (user) fetchRooms(user.id);
-  }, [user, fetchRooms]);
+    if (userId) fetchRooms(userId, { ifStaleMs: STALE_MS });
+  }, [userId, fetchRooms]);
 
   useEffect(() => {
     if (!newMessageOpen || !user) return;
@@ -135,11 +139,28 @@ export function ChatDirectoryScreen() {
   const unreadCount = useMemo(() => rooms.reduce((acc, r) => acc + (r.unread || 0), 0), [rooms]);
   const teamThreadsCount = useMemo(() => rooms.filter((r) => r.kind === 'server' || r.kind === 'room').length, [rooms]);
 
+  // Room search asks the server, so it finds group rooms beyond the pages already loaded. DMs take
+  // their name from the other person's profile, so those are still matched among loaded conversations.
+  const roomSearch = useServerSearch(dq, async (n) => (await listVisibleChatrooms(user?.id ?? '', 0, 40, n)).rows, { enabled: !!user?.id });
+
   const filtered = useMemo(() => {
-    const needle = dq.trim().toLowerCase();
-    return rooms.filter((r) => {
+    const needle = roomSearch.needle;
+    const matchesText = (r: Chatroom) =>
+      r.name.toLowerCase().includes(needle) ||
+      r.description.toLowerCase().includes(needle) ||
+      (r.serverRegion?.toLowerCase().includes(needle) ?? false);
+    let source: Chatroom[] = rooms;
+    if (needle && roomSearch.results) {
+      // Prefer the live store copy of a room (join state, unread) over the search snapshot.
+      const live = new Map(rooms.map((r) => [r.id, r]));
+      const groupHits = roomSearch.results.map((r) => live.get(r.id) ?? r);
+      const dmHits = rooms.filter((r) => r.kind === 'dm' && matchesText(r));
+      source = [...groupHits, ...dmHits];
+    }
+    return source.filter((r) => {
       const matchQ =
         !needle ||
+        (needle && roomSearch.results !== null) ||
         r.name.toLowerCase().includes(needle) ||
         r.description.toLowerCase().includes(needle) ||
         (r.serverRegion?.toLowerCase().includes(needle) ?? false);
@@ -149,12 +170,17 @@ export function ChatDirectoryScreen() {
       if (activeTab === 'DMS') return r.kind === 'dm';
       return true;
     });
-  }, [rooms, dq, activeTab]);
+  }, [rooms, roomSearch.results, roomSearch.needle, activeTab]);
 
   const pending = rooms.find((r) => r.id === pendingId);
   const open = (r: Chatroom) => {
     if (r.joined) {
       nav.navigate('ChatDetail', { id: r.id });
+    } else if (r.joinRequestPending) {
+      // Already sent — re-showing the same "Request to join" prompt would let someone fire
+      // off duplicate requests by tapping again. ChatroomRow's own subtitle already tells
+      // them it's pending; nothing to do here.
+      return;
     } else if (!seenGuidelines[r.id]) {
       setGuidelinesTargetId(r.id);
     } else {
@@ -202,7 +228,7 @@ export function ChatDirectoryScreen() {
         </Pressable>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
@@ -234,7 +260,7 @@ export function ChatDirectoryScreen() {
         </CyberCutBox>
 
         {/* Filter Tabs (ALL / UNREAD / ROOMS / DMS) */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTabsRow}>
+        <KeyboardAwareScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTabsRow}>
           {(['ALL', 'UNREAD', 'ROOMS', 'DMS'] as FilterTab[]).map((tab) => {
             const active = activeTab === tab;
             return (
@@ -260,7 +286,7 @@ export function ChatDirectoryScreen() {
               </Pressable>
             );
           })}
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {/* Prominent Create Room CTA — shown whenever you're looking at rooms specifically,
             not just the small pencil icon in the header, which is easy to miss. */}
@@ -331,7 +357,7 @@ export function ChatDirectoryScreen() {
         {!loading && !error && filtered.length > 0 ? (
           <LoadMoreButton hasMore={roomsHasMore} onPress={() => user && loadMoreRooms(user.id)} />
         ) : null}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Confirmation Modals */}
       <GuidelinesSheet
@@ -444,7 +470,7 @@ export function ChatDirectoryScreen() {
                   style={styles.connectionRow}
                   accessibilityRole="button"
                 >
-                  <Image source={getCyberAvatarSource(p.id)} style={styles.connectionAvatar} />
+                  <CutAvatar source={resolveAvatarSource(p.avatarUri, p.avatarId)} size={44} cut={11} borderWidth={1} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.connectionName, { color: colors.text }]} numberOfLines={1}>
                       {p.displayName}

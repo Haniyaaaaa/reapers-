@@ -1,7 +1,7 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { AdminStackParamList } from '../../../navigation/types';
 import { BladeCard } from '../../../components/cards/BladeCard';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
@@ -13,13 +13,20 @@ import { ScreenHeader } from '../../../components/layout/ScreenHeader';
 import { useAdminStore } from '../../../store/adminStore';
 import { fonts, radius, useTheme } from '../../../theme';
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({ label, value, link }: { label: string; value?: string | null; link?: boolean }) {
   const { colors } = useTheme();
   if (!value) return null;
+  const open = () => Linking.openURL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
   return (
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: colors.muted }]}>{label}</Text>
-      <Text style={[styles.fieldValue, { color: colors.text }]}>{value}</Text>
+      {link ? (
+        <Pressable onPress={open} accessibilityRole="link">
+          <Text style={[styles.fieldValue, { color: colors.cyan, textDecorationLine: 'underline' }]}>{value}</Text>
+        </Pressable>
+      ) : (
+        <Text style={[styles.fieldValue, { color: colors.text }]}>{value}</Text>
+      )}
     </View>
   );
 }
@@ -223,11 +230,11 @@ export function AdminUserDetailScreen() {
             <Field label="Location" value={profile.location} />
             <Field label="Bio" value={profile.bio} />
             <Field label="Roles" value={profile.roles.join(', ') || 'none'} />
-            <Field label="Games" value={profile.games.join(', ')} />
-            <Field label="Skills" value={profile.skills.join(', ')} />
-            <Field label="Tags" value={profile.tags.join(', ')} />
-            <Field label="Portfolio" value={profile.portfolio_url} />
-            <Field label="LinkedIn" value={profile.linkedin_url} />
+            <Field label="Games they like" value={profile.games.join(', ')} />
+            <Field label="Genres" value={profile.interests.join(', ')} />
+            <Field label="Skills / tags" value={Array.from(new Set([...profile.skills, ...profile.tags])).join(', ')} />
+            <Field label="Portfolio" value={profile.portfolio_url} link />
+            <Field label="LinkedIn" value={profile.linkedin_url} link />
             <Field label="Support tickets" value={String(ticketCount)} />
           </>
         )}
@@ -260,7 +267,7 @@ export function AdminUserDetailScreen() {
               disabled={busy}
               accessibilityRole="button"
             >
-              <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed }}>Approve</Text>
+              <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed }}>{busy ? 'Approving…' : 'Approve'}</Text>
             </Pressable>
             <Pressable
               onPress={() => {
@@ -301,8 +308,8 @@ export function AdminUserDetailScreen() {
           <Field label="Bio" value={expert.bio} />
           <Field label="Specialties" value={expert.specialties.join(', ')} />
           <Field label="Years experience" value={expert.years_experience != null ? String(expert.years_experience) : undefined} />
-          <Field label="Portfolio" value={expert.portfolio_url} />
-          <Field label="LinkedIn" value={expert.linkedin_url} />
+          <Field label="Portfolio" value={expert.portfolio_url} link />
+          <Field label="LinkedIn" value={expert.linkedin_url} link />
           {!expert.verified && expert.rejection_reason ? <Field label="Rejection reason" value={expert.rejection_reason} /> : null}
           <View style={styles.statusRow}>
             <Text style={[styles.fieldLabel, { color: colors.muted }]}>Verified</Text>

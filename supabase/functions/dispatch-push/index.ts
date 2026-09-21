@@ -58,14 +58,31 @@ Deno.serve(async (req) => {
   // `target` (the same {screen, id?} shape NotificationsScreen already uses to navigate on
   // tap in-app) rides along as the push's `data` payload, so a tapped notification carries
   // the same routing info out-of-app — the app's push-response handler reads this to deep-link.
-  const messages = tokens.map((t) => ({ to: t.token, title, body, sound: 'default', data: { target } }));
+  // channelId must match the channel the app creates (registerForPush.ts); priority 'high' lets
+  // Android deliver while the phone is idle/dozing instead of batching it for later.
+  const messages = tokens.map((t) => ({ to: t.token, title, body, sound: 'default', priority: 'high', channelId: 'default', data: { target } }));
   const res = await fetch(EXPO_PUSH_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(messages),
   });
 
-  return new Response(JSON.stringify({ sent: messages.length, expoStatus: res.status }), {
+  // Expo answers 200 even when a push is rejected — the per-message result is in the body
+  // (e.g. DeviceNotRegistered, InvalidCredentials for missing FCM/APNs setup). Read it, drop
+  // dead tokens, and log failures so a "no notification" report is diagnosable from the
+  // function logs instead of silent.
+  const result = (await res.json().catch(() => null)) as { data?: { status: string; message?: string; details?: { error?: string } }[] } | null;
+  const tickets = result?.data ?? [];
+  const dead: string[] = [];
+  tickets.forEach((t, i) => {
+    if (t.status !== 'ok') {
+      console.error('expo push rejected', { user_id, message: t.message, error: t.details?.error });
+      if (t.details?.error === 'DeviceNotRegistered') dead.push(tokens[i].token);
+    }
+  });
+  if (dead.length) await supabase.from('push_tokens').delete().in('token', dead);
+
+  return new Response(JSON.stringify({ sent: messages.length, expoStatus: res.status, tickets }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });

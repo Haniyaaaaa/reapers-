@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import {
   Image,
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { ChipPicker } from '../../../components/inputs/ChipPicker';
+import { COMMUNITY_TAGS } from '../../../data/communityTags';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +31,7 @@ import { useUiStore } from '../../../store/uiStore';
 import { uploadImage } from '../../../services/supabase/storage';
 import type { MainStackParamList } from '../../../navigation/types';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 export function CommunityDetailScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, 'CommunityDetail'>>();
@@ -58,6 +60,7 @@ export function CommunityDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
   const [editLocation, setEditLocation] = useState('');
   const [editLogoUri, setEditLogoUri] = useState<string | undefined>();
   const [editLogoChanged, setEditLogoChanged] = useState(false);
@@ -94,6 +97,7 @@ export function CommunityDetailScreen() {
   const startEditing = () => {
     setEditName(community.name);
     setEditDescription(community.description);
+    setEditTags(community.tags ?? []);
     setEditLocation(community.location ?? '');
     setEditLogoUri(community.logoUrl);
     setEditLogoChanged(false);
@@ -122,6 +126,7 @@ export function CommunityDetailScreen() {
         name: editName.trim(),
         description: editDescription.trim(),
         location: editLocation.trim() || undefined,
+        tags: editTags,
         ...(logoUrl ? { logoUrl } : {}),
       });
       setEditing(false);
@@ -252,7 +257,7 @@ export function CommunityDetailScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
@@ -275,6 +280,18 @@ export function CommunityDetailScreen() {
 
             <AuthTextField label="Name" value={editName} onChangeText={setEditName} maxLength={80} />
             <AuthTextField label="Description" value={editDescription} onChangeText={setEditDescription} multiline maxLength={300} />
+            <Text style={[styles.metaText, { color: colors.muted, marginTop: 4, marginBottom: 6 }]}>TAGS</Text>
+            <ChipPicker
+              options={COMMUNITY_TAGS}
+              selected={editTags}
+              allowCustom
+              onToggle={(v) =>
+                setEditTags((p) => {
+                  const t = v.toUpperCase();
+                  return p.includes(t) ? p.filter((x) => x !== t) : [...p, t];
+                })
+              }
+            />
             <AuthTextField label="Location" value={editLocation} onChangeText={setEditLocation} />
 
             {editErr ? <InlineErrorText message={editErr} /> : null}
@@ -324,6 +341,16 @@ export function CommunityDetailScreen() {
           </View>
 
           <Text style={[styles.descriptionText, { color: colors.text }]}>{community.description}</Text>
+
+          {(community.tags ?? []).length > 0 ? (
+            <View style={styles.tagsWrap}>
+              {community.tags.map((t) => (
+                <View key={t} style={[styles.userTagPill, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]}>
+                  <Text style={[styles.userTagPillText, { color: colors.primary }]}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           {/* MAIN CTA BUTTON */}
           <Pressable
@@ -457,7 +484,7 @@ export function CommunityDetailScreen() {
             </CyberCutBox>
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <ConfirmSheet
         visible={deleteConfirm}
@@ -486,6 +513,9 @@ export function CommunityDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  userTagPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4, borderWidth: 1 },
+  userTagPillText: { fontFamily: fonts.mono, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5 },
   container: {
     flex: 1,
     backgroundColor: '#090F1C',

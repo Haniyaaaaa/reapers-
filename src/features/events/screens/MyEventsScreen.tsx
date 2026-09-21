@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -65,9 +65,12 @@ export function MyEventsScreen() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('UPCOMING');
   const [dateBucket, setDateBucket] = useState<DateBucket>('ALL');
 
-  useEffect(() => {
-    if (user) fetchMyEvents(user.id);
-  }, [user, fetchMyEvents]);
+  // Refetch whenever the screen regains focus so changes made elsewhere (delete, edit, RSVP) show up.
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchMyEvents(user.id);
+    }, [user, fetchMyEvents]),
+  );
 
   const refreshControl = useRefreshControl(async () => {
     if (user) await fetchMyEvents(user.id);

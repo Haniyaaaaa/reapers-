@@ -10,17 +10,11 @@ type UiState = {
   streakEmoji: StreakOptionId;
   setStreakEmoji: (id: StreakOptionId) => void;
   connected: boolean;
-  simulateOffline: boolean;
   offline: boolean;
   setConnected: (connected: boolean) => void;
-  setOffline: (offline: boolean) => void;
   seenGuidelines: Record<string, true>;
   markGuidelinesSeen: (id: string) => void;
 };
-
-function derive(connected: boolean, simulateOffline: boolean) {
-  return simulateOffline || !connected;
-}
 
 export const useUiStore = create<UiState>()(
   persist(
@@ -30,12 +24,8 @@ export const useUiStore = create<UiState>()(
       streakEmoji: 'cyborg',
       setStreakEmoji: (streakEmoji) => set({ streakEmoji }),
       connected: true,
-      simulateOffline: false,
       offline: false,
-      setConnected: (connected) =>
-        set((s) => ({ connected, offline: derive(connected, s.simulateOffline) })),
-      setOffline: (offline) =>
-        set((s) => ({ simulateOffline: offline, offline: derive(s.connected, offline) })),
+      setConnected: (connected) => set({ connected, offline: !connected }),
       seenGuidelines: {},
       markGuidelinesSeen: (id) => set((s) => ({ seenGuidelines: { ...s.seenGuidelines, [id]: true } })),
     }),

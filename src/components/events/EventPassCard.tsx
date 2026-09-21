@@ -16,6 +16,10 @@ export function EventPassCard({
   formattedDate,
   startTime,
   endTime,
+  ticketNumber = 1,
+  ticketTotal = 1,
+  planName,
+  unitPrice,
 }: {
   event: GameEvent;
   attendeeName: string;
@@ -24,12 +28,21 @@ export function EventPassCard({
   formattedDate: string;
   startTime: string;
   endTime: string;
+  /** Which ticket of the order this pass is (a buyer with 3 tickets gets 3 passes, each with its own code). */
+  ticketNumber?: number;
+  ticketTotal?: number;
+  planName?: string;
+  unitPrice?: number;
 }) {
+  const multi = ticketTotal > 1;
+  // Ticket 1 is the buyer; the rest are guests they can forward, each with their own code.
+  const isGuest = multi && ticketNumber > 1;
+  const code = multi ? `${reservationCode}-${ticketNumber}` : reservationCode;
   return (
     <View style={styles.wrap}>
       <LinearGradient colors={['#0E1423', '#1A1030']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.mainSlip}>
         <View style={styles.brandRow}>
-          <Text style={styles.brandText}>REAPERS PASS</Text>
+          <Text style={styles.brandText}>{multi ? `REAPERS PASS · ${ticketNumber} OF ${ticketTotal}` : 'REAPERS PASS'}</Text>
           <Ionicons name="ticket-outline" size={16} color="#00E5FF" />
         </View>
 
@@ -46,7 +59,7 @@ export function EventPassCard({
             </View>
           )}
           <View>
-            <Text style={styles.attendeeLabel}>ATTENDEE</Text>
+            <Text style={styles.attendeeLabel}>{isGuest ? 'GUEST OF' : 'ATTENDEE'}</Text>
             <Text style={styles.attendeeName}>{attendeeName}</Text>
           </View>
         </View>
@@ -71,9 +84,9 @@ export function EventPassCard({
             </Text>
           </View>
           <View style={styles.detailCol}>
-            <Text style={styles.detailLabel}>PRICE</Text>
-            <Text style={styles.detailValue}>
-              {event.currency || 'PKR'} {event.price}
+            <Text style={styles.detailLabel}>TICKET</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {planName ?? 'Standard ticket'} · {event.currency || 'PKR'} {(unitPrice ?? event.price ?? 0).toLocaleString('en-US')}
             </Text>
           </View>
         </View>
@@ -94,8 +107,8 @@ export function EventPassCard({
           <Text style={styles.approvedBadgeText}>APPROVED</Text>
         </View>
         <View>
-          <Text style={styles.codeLabel}>RESERVATION CODE</Text>
-          <Text style={styles.codeValue}>{reservationCode}</Text>
+          <Text style={styles.codeLabel}>{multi ? 'TICKET CODE' : 'RESERVATION CODE'}</Text>
+          <Text style={styles.codeValue}>{code}</Text>
         </View>
       </LinearGradient>
     </View>

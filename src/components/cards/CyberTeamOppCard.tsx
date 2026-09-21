@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
 } from 'react-native';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 const DEFAULT_TEAM_AVATAR = require('../../../assets/avatars/extracted/female_6.jpg');
 
@@ -17,13 +17,14 @@ interface CyberTeamOppCardProps {
   title: string;
   matchScore: string;
   tags: string[];
-  description: string;
+  description?: string;
   hoursRev?: string;
   avatarSource?: ImageSourcePropType;
   avatarUri?: string;
   requested?: boolean;
   onPress?: () => void;
-  onPortfolio?: () => void;
+  /** Tapping the avatar or title (e.g. to open the poster's profile). */
+  onHeaderPress?: () => void;
   onRequestToJoin?: () => void;
 }
 
@@ -32,12 +33,12 @@ export function CyberTeamOppCard({
   matchScore,
   tags,
   description,
-  hoursRev = '~10 HRS/WEEK · REV',
+  hoursRev,
   avatarSource,
   avatarUri,
   requested = false,
   onPress,
-  onPortfolio,
+  onHeaderPress,
   onRequestToJoin,
 }: CyberTeamOppCardProps) {
   const { colors, isLight } = useTheme();
@@ -45,6 +46,7 @@ export function CyberTeamOppCard({
 
   // Render "Needs [Role Name] · Engine · Phase" with role highlighted in bold
   const renderDescription = () => {
+    if (!description) return null;
     if (description.startsWith('Needs ')) {
       const afterNeeds = description.slice(6);
       const parts = afterNeeds.split('·');
@@ -83,17 +85,15 @@ export function CyberTeamOppCard({
       >
         <View style={styles.cardInner}>
           {/* Top Header: Chamfer Avatar Box + Title + Right Match Score */}
-          <View style={styles.headerRow}>
-            <CyberCutBox
-              cutSize={8}
-              radius={4}
+          <Pressable onPress={onHeaderPress ?? onPress} style={styles.headerRow} accessibilityRole="button">
+            <CutAvatar
+              source={resolvedSource}
+              size={52}
+              cut={13}
               fill={isLight ? 'rgba(168, 85, 247, 0.12)' : 'rgba(168, 85, 247, 0.2)'}
               borderColor={isLight ? 'rgba(168, 85, 247, 0.3)' : 'rgba(192, 132, 252, 0.35)'}
               borderWidth={1}
-              style={styles.avatarBox}
-            >
-              <Image source={resolvedSource} style={styles.avatarImg} />
-            </CyberCutBox>
+            />
 
             <View style={styles.titleInfo}>
               <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
@@ -102,9 +102,10 @@ export function CyberTeamOppCard({
             </View>
 
             <Text style={[styles.matchText, { color: colors.text }]}>{formattedMatch}</Text>
-          </View>
+          </Pressable>
 
           {/* Skill Tag Capsule Pills */}
+          {tags.length > 0 ? (
           <View style={styles.tagsRow}>
             {tags.map((tag) => (
               <View
@@ -124,32 +125,16 @@ export function CyberTeamOppCard({
               </View>
             ))}
           </View>
+          ) : null}
 
           {/* Description line */}
           {renderDescription()}
 
           {/* Footer Row: Commitment Info & Chamfer Action Buttons */}
           <View style={styles.footerRow}>
-            <Text style={[styles.hoursText, { color: colors.muted }]}>{hoursRev.toUpperCase()}</Text>
+            {hoursRev ? <Text style={[styles.hoursText, { color: colors.muted }]}>{hoursRev.toUpperCase()}</Text> : null}
 
-            <View style={styles.actionButtonsRow}>
-              <Pressable
-                onPress={onPortfolio}
-                style={styles.portfolioBtn}
-                accessibilityRole="button"
-              >
-                <CyberCutBox
-                  cutSize={6}
-                  radius={4}
-                  fill={isLight ? 'rgba(0, 180, 216, 0.08)' : 'rgba(255, 255, 255, 0.04)'}
-                  borderColor={isLight ? 'rgba(0, 180, 216, 0.40)' : 'rgba(255, 255, 255, 0.15)'}
-                  borderWidth={1}
-                  style={styles.portfolioCutBox}
-                >
-                  <Text style={[styles.portfolioText, isLight && { color: colors.electricAccent }]}>PORTFOLIO</Text>
-                </CyberCutBox>
-              </Pressable>
-
+            <View style={[styles.actionButtonsRow, { marginLeft: 'auto' }]}>
               <Pressable
                 onPress={onRequestToJoin}
                 style={styles.requestBtn}
@@ -279,22 +264,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  portfolioBtn: {
-    height: 34,
-  },
-  portfolioCutBox: {
-    paddingHorizontal: 14,
-    height: 34,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  portfolioText: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    letterSpacing: 0.6,
   },
   requestBtn: {
     height: 34,

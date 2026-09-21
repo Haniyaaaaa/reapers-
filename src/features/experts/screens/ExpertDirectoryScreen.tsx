@@ -1,12 +1,11 @@
 import { useNavigation } from '@react-navigation/native';
+import { EXPERT_GOLD, ExpertBadge } from '../../../components/experts/ExpertBadge';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -23,14 +22,21 @@ import { EmptyState } from '../../../components/feedback/EmptyState';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { RetryBanner } from '../../../components/feedback/RetryBanner';
 import { Skeleton } from '../../../components/feedback/Skeleton';
+import { AutoCarousel } from '../../../components/layout/AutoCarousel';
 import { Screen } from '../../../components/layout/Screen';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../../data/cyberAvatars';
 import { EXPERTISE_TAGS } from '../../../types/expert';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchExperts } from '../../../services/supabase/experts';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useExpertStore } from '../../../store/expertStore';
+import { STALE_MS } from '../../../store/swr';
 import { isoWeekNumber } from '../../../utils/isoWeek';
 import { fonts, useTheme } from '../../../theme';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 type Nav = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList, 'ExpertsTab'>,
@@ -47,7 +53,6 @@ export function ExpertDirectoryScreen() {
 
   const experts = useExpertStore((s) => s.experts);
   const expertsHasMore = useExpertStore((s) => s.expertsHasMore);
-  const expertsTotalCount = useExpertStore((s) => s.expertsTotalCount);
   const sessionCounts = useExpertStore((s) => s.sessionCounts);
   const loading = useExpertStore((s) => s.loading);
   const error = useExpertStore((s) => s.error);
@@ -64,7 +69,7 @@ export function ExpertDirectoryScreen() {
 
   useEffect(() => {
     const category = filter === 'All' ? undefined : filter;
-    fetchExperts(category, user?.id);
+    fetchExperts(category, user?.id, { ifStaleMs: STALE_MS });
   }, [filter, user?.id, fetchExperts]);
 
   // Depend on a joined primitive, not the array itself — an array can get a new reference
@@ -80,20 +85,30 @@ export function ExpertDirectoryScreen() {
     await Promise.all([fetchExperts(category, user?.id), fetchRecommended(user?.skills ?? [], user?.id)]);
   });
 
+  // Search asks the server (so it finds experts beyond the loaded page, with the active specialty
+  // applied); until the answer arrives the loaded list is filtered locally.
+  const dq = useDebouncedValue(searchQuery);
+  const specialty = filter === 'All' ? undefined : filter;
+  const search = useServerSearch(dq, (n) => searchExperts(n, { specialty, excludeUserId: user?.id }), { deps: [specialty, user?.id] });
+  const searchActive = search.needle.length > 0;
+  const loadSessionCounts = useExpertStore((s) => s.loadSessionCounts);
+
+  useEffect(() => {
+    if (search.results?.length) loadSessionCounts(search.results.map((e) => e.id));
+  }, [search.results, loadSessionCounts]);
+
   const filteredList = useMemo(() => {
-    let result = experts;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (e) =>
-          e.name.toLowerCase().includes(q) ||
-          e.role.toLowerCase().includes(q) ||
-          e.company.toLowerCase().includes(q) ||
-          e.specialties.some((s) => s.toLowerCase().includes(q)),
-      );
-    }
-    return result;
-  }, [experts, searchQuery]);
+    if (search.results) return search.results;
+    if (!searchActive) return experts;
+    const q = search.needle;
+    return experts.filter(
+      (e) =>
+        e.name.toLowerCase().includes(q) ||
+        e.role.toLowerCase().includes(q) ||
+        e.company.toLowerCase().includes(q) ||
+        e.specialties.some((s) => s.toLowerCase().includes(q)),
+    );
+  }, [experts, search.results, search.needle, searchActive]);
 
   // "Expert of the Week": a deterministic weekly rotation among the top-rated pool, not the
   // frozen-forever #1 spot — every viewer computes the same pick for the same week, and it
@@ -104,6 +119,12 @@ export function ExpertDirectoryScreen() {
     return pool[isoWeekNumber(new Date()) % pool.length];
   }, [filteredList]);
 
+  // Carousel order: this week's pick first, then the rest of the top-rated pool.
+  const featuredExperts = useMemo(() => {
+    const pool = filteredList.slice(0, FEATURED_POOL_SIZE);
+    return featuredExpert ? [featuredExpert, ...pool.filter((e) => e.id !== featuredExpert.id)] : [];
+  }, [filteredList, featuredExpert]);
+
   const regularExperts = filteredList.filter((e) => e.id !== featuredExpert?.id);
 
   return (
@@ -112,7 +133,6 @@ export function ExpertDirectoryScreen() {
       <View style={styles.headerRow}>
         <View style={styles.titleWrap}>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Experts</Text>
-          <Text style={[styles.headerSubtitle, { color: colors.electricAccent }]}>{expertsTotalCount} VERIFIED PROFESSIONALS · FREE FOR MEMBERS</Text>
         </View>
       </View>
 
@@ -131,7 +151,7 @@ export function ExpertDirectoryScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search communities, demos, experts..."
+              placeholder="Search experts..."
               placeholderTextColor={colors.muted2}
               style={[styles.searchInput, { color: colors.text }]}
               autoCapitalize="none"
@@ -147,7 +167,8 @@ export function ExpertDirectoryScreen() {
       </View>
 
       {/* Filter Chips Horizontal Row — real EXPERTISE_TAGS, not a fake category set */}
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterChipsRow}
@@ -187,7 +208,7 @@ export function ExpertDirectoryScreen() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Section 1: Top Rated / Expert of the Week */}
       {featuredExpert && !loading ? (
@@ -205,8 +226,13 @@ export function ExpertDirectoryScreen() {
             <CyberSeeAllButton onPress={() => nav.navigate('ExpertsList', { mode: 'top_rated' })} />
           </View>
 
+          <AutoCarousel
+            items={featuredExperts}
+            keyExtractor={(e) => e.id}
+            showDots
+            renderItem={(ex) => (
           <Pressable
-            onPress={() => nav.navigate('ExpertProfile', { id: featuredExpert.id })}
+            onPress={() => nav.navigate('ExpertProfile', { id: ex.id })}
             accessibilityRole="button"
           >
             <CyberCutBox
@@ -220,36 +246,30 @@ export function ExpertDirectoryScreen() {
               <View style={styles.featuredInner}>
                 {/* Badges */}
                 <View style={styles.featuredBadgesRow}>
-                  <View style={styles.weekBadge}>
-                    <Text style={styles.weekBadgeText}>EXPERT OF THE WEEK</Text>
-                  </View>
-                  {featuredExpert.verified ? (
-                    <View style={styles.verifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={12} color="#00F0FF" />
-                      <Text style={styles.verifiedBadgeText}>VERIFIED</Text>
+                  {ex.id === featuredExpert?.id ? (
+                    <View style={styles.weekBadge}>
+                      <Text style={styles.weekBadgeText}>EXPERT OF THE WEEK</Text>
                     </View>
+                  ) : null}
+                  {ex.verified ? (
+                    <ExpertBadge label="VERIFIED" />
                   ) : null}
                 </View>
 
                 {/* Expert Header Row */}
                 <View style={styles.featuredExpertHeader}>
-                  <View style={styles.featuredAvatarBox}>
-                    <Image
-                      source={getCyberAvatarSource(featuredExpert.avatarId)}
-                      style={styles.featuredAvatarImg}
-                    />
-                  </View>
+                  <CutAvatar source={resolveAvatarSource(ex.avatar, ex.avatarId)} size={52} cut={13} borderColor={ex.verified ? EXPERT_GOLD : '#00F0FF'} borderWidth={ex.verified ? 2 : 1} />
                   <View style={styles.featuredExpertInfo}>
-                    <Text style={[styles.featuredName, { color: colors.text }]}>{featuredExpert.name}</Text>
-                    <Text style={[styles.featuredRole, { color: colors.muted }]}>{featuredExpert.role}</Text>
-                    {featuredExpert.company ? <Text style={[styles.featuredStudioTags, { color: colors.primary }]}>{featuredExpert.company.toUpperCase()}</Text> : null}
+                    <Text style={[styles.featuredName, { color: colors.text }]}>{ex.name}</Text>
+                    <Text style={[styles.featuredRole, { color: colors.muted }]}>{ex.role}</Text>
+                    {ex.company ? <Text style={[styles.featuredStudioTags, { color: colors.primary }]}>{ex.company.toUpperCase()}</Text> : null}
                   </View>
                 </View>
 
                 {/* Bio, real — not a hardcoded quote */}
-                {featuredExpert.bio ? (
+                {ex.bio ? (
                   <Text style={[styles.featuredQuoteText, { color: colors.text }]} numberOfLines={2}>
-                    {featuredExpert.bio}
+                    {ex.bio}
                   </Text>
                 ) : null}
 
@@ -257,13 +277,13 @@ export function ExpertDirectoryScreen() {
                 <View style={[styles.featuredFooterRow, { borderTopColor: colors.cardBorder }]}>
                   <View style={styles.ratingRow}>
                     <Ionicons name="star" size={14} color="#FFB800" />
-                    <Text style={[styles.ratingNum, { color: colors.text }]}>{featuredExpert.rating > 0 ? featuredExpert.rating.toFixed(1) : '—'}</Text>
+                    <Text style={[styles.ratingNum, { color: colors.text }]}>{ex.rating > 0 ? ex.rating.toFixed(1) : '—'}</Text>
                     <Text style={styles.ratingDot}>·</Text>
-                    <Text style={[styles.sessionsText, { color: colors.muted }]}>{sessionCounts[featuredExpert.id] ?? 0} SESSIONS</Text>
+                    <Text style={[styles.sessionsText, { color: colors.muted }]}>{sessionCounts[ex.id] ?? 0} SESSIONS</Text>
                   </View>
 
                   <Pressable
-                    onPress={() => nav.navigate('ExpertProfile', { id: featuredExpert.id })}
+                    onPress={() => nav.navigate('ExpertProfile', { id: ex.id })}
                     style={styles.book15Touch}
                     accessibilityRole="button"
                   >
@@ -289,6 +309,8 @@ export function ExpertDirectoryScreen() {
               </View>
             </CyberCutBox>
           </Pressable>
+            )}
+          />
         </View>
       ) : null}
 
@@ -296,7 +318,7 @@ export function ExpertDirectoryScreen() {
       <View style={styles.sectionWrap}>
         <View style={styles.sectionHeaderRow}>
           <View style={styles.sectionHeaderWrap}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>{recommendedIsFallback ? 'More Top Experts' : 'Recommended For Your Project'}</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{searchActive ? 'Search results' : recommendedIsFallback ? 'More Top Experts' : 'Recommended For Your Project'}</Text>
             <LinearGradient
               colors={['#00F0FF', 'rgba(216, 60, 255, 0.6)', 'transparent']}
               start={{ x: 0, y: 0 }}
@@ -316,23 +338,23 @@ export function ExpertDirectoryScreen() {
 
         {!loading && error ? <RetryBanner message={`Could not load. ${error}`} onRetry={fetchExperts} /> : null}
 
-        {!loading && !error && filteredList.length === 0 ? (
-          <EmptyState title="No experts match that specialty." />
+        {!loading && !error && filteredList.length === 0 && !search.searching ? (
+          <EmptyState title={searchActive ? 'No experts match your search.' : 'No experts match that specialty.'} />
         ) : null}
 
-        {!loading && !error
+        {!loading && !error && !searchActive
           ? recommendedExperts.slice(0, 5).map((e) => (
               <ExpertListCard key={e.id} expert={e} sessionCount={sessionCounts[e.id]} onPress={() => nav.navigate('ExpertProfile', { id: e.id })} />
             ))
           : null}
 
-        {!loading && !error && filteredList.length > 0 && recommendedExperts.length === 0
+        {!loading && !error && filteredList.length > 0 && (searchActive || recommendedExperts.length === 0)
           ? regularExperts.map((e) => (
               <ExpertListCard key={e.id} expert={e} sessionCount={sessionCounts[e.id]} onPress={() => nav.navigate('ExpertProfile', { id: e.id })} />
             ))
           : null}
 
-        {!loading && !error && filteredList.length > 0 ? (
+        {!loading && !error && filteredList.length > 0 && !searchActive ? (
           <LoadMoreButton hasMore={recommendedExperts.length > 0 ? recommendedHasMore : expertsHasMore} onPress={() => (recommendedExperts.length > 0 ? loadMoreRecommended(user?.skills ?? [], user?.id) : loadMoreExperts())} />
         ) : null}
       </View>
@@ -354,13 +376,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 0.5,
-  },
-  headerSubtitle: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#00F0FF',
-    letterSpacing: 0.8,
   },
   searchRow: {
     flexDirection: 'row',
@@ -389,7 +404,7 @@ const styles = StyleSheet.create({
   filterChipsRow: {
     flexDirection: 'row',
     gap: 8,
-    paddingBottom: 16,
+    paddingBottom: 20,
   },
   chipPressable: {
     height: 34,

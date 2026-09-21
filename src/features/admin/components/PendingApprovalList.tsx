@@ -6,6 +6,8 @@ import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { fonts } from '../../../theme';
 import { useTheme } from '../../../theme/useTheme';
 import type { ProfileRow } from '../../../services/supabase/types';
+import { ApprovalCard } from './ApprovalCard';
+import { getCyberAvatarSource } from '../../../data/cyberAvatars';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 
 export function PendingApprovalList({
@@ -34,78 +36,24 @@ export function PendingApprovalList({
     <>
       {people.length === 0 ? <Text style={[styles.emptyText, { color: colors.muted }]}>{emptyLabel}</Text> : null}
       {people.map((p) => (
-        <View key={p.id} style={{ marginBottom: 12 }}>
-          <CyberCutBox
-            cutSize={12}
-            radius={8}
-            fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
-            style={{ width: '100%' }}
-          >
-            <View style={styles.cardInner}>
-              <Text style={[styles.nameText, { color: colors.text }]}>
-                {p.first_name || p.last_name ? `${p.first_name} ${p.last_name}`.trim() : p.display_name}
-              </Text>
-              <Text style={[styles.metaText, { color: colors.muted }]}>
-                @{p.username}
-                {p.phone ? ` · ${p.phone}` : ''}
-              </Text>
-              {p.bio ? <Text style={[styles.metaText, { color: colors.muted }]}>{p.bio}</Text> : null}
-              {p.games.length ? <Text style={[styles.metaText, { color: colors.muted }]}>Games: {p.games.join(', ')}</Text> : null}
-              {p.skills.length ? <Text style={[styles.metaText, { color: colors.muted }]}>Skills: {p.skills.join(', ')}</Text> : null}
-              {p.tags.length ? <Text style={[styles.metaText, { color: colors.muted }]}>Tags: {p.tags.join(', ')}</Text> : null}
-              {p.portfolio_url ? <Text style={[styles.metaText, { color: colors.primary }]}>{p.portfolio_url}</Text> : null}
-              {p.linkedin_url ? <Text style={[styles.metaText, { color: colors.primary }]}>{p.linkedin_url}</Text> : null}
-
-              <Pressable onPress={() => onViewDetails(p.id)} accessibilityRole="button" style={{ marginTop: 8 }}>
-                <Text style={[styles.viewDetailsText, { color: colors.primary }]}>View full details</Text>
-              </Pressable>
-
-              <View style={styles.actionsRow}>
-                <Pressable
-                  onPress={async () => {
-                    setBusy(p.id);
-                    await onApprove(p.id);
-                    setBusy(null);
-                  }}
-                  style={styles.actionBtnTouch}
-                  disabled={busy === p.id}
-                  accessibilityRole="button"
-                >
-                  <CyberCutBox gradient cutSize={6} radius={4} style={{ width: '100%', height: 38 }}>
-                    <View style={styles.btnInner}>
-                      <Text style={styles.approveBtnText}>{busy === p.id ? 'Approving...' : 'Approve'}</Text>
-                    </View>
-                  </CyberCutBox>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => {
-                    setReason('');
-                    setRejecting(p);
-                  }}
-                  style={styles.actionBtnTouch}
-                  disabled={busy === p.id}
-                  accessibilityRole="button"
-                >
-                  <CyberCutBox
-                    cutSize={6}
-                    radius={4}
-                    fill="rgba(40, 15, 25, 0.6)"
-                    borderColor="rgba(255, 77, 109, 0.6)"
-                    borderWidth={1}
-                    style={{ width: '100%', height: 38 }}
-                  >
-                    <View style={styles.btnInner}>
-                      <Text style={styles.rejectBtnText}>Reject</Text>
-                    </View>
-                  </CyberCutBox>
-                </Pressable>
-              </View>
-            </View>
-          </CyberCutBox>
-        </View>
+        <ApprovalCard
+          key={p.id}
+          avatar={p.avatar_uri ? { uri: p.avatar_uri } : getCyberAvatarSource(p.avatar_id ?? undefined)}
+          title={p.first_name || p.last_name ? `${p.first_name} ${p.last_name}`.trim() : p.display_name}
+          subtitle={`@${p.username}`}
+          badge={p.roles[0] ?? 'member'}
+          busy={busy === p.id}
+          onViewDetails={() => onViewDetails(p.id)}
+          onApprove={async () => {
+            setBusy(p.id);
+            await onApprove(p.id);
+            setBusy(null);
+          }}
+          onReject={() => {
+            setReason('');
+            setRejecting(p);
+          }}
+        />
       ))}
 
       <LoadMoreButton hasMore={hasMore} onPress={onLoadMore} />

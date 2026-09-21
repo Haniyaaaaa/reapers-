@@ -1,8 +1,9 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CyberCutBox } from '../cyber/CyberCutBox';
-import { getCyberAvatarSource } from '../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../data/cyberAvatars';
 import { fonts, useTheme } from '../../theme';
 import type { PersonCard } from '../../types/extra';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 /** Full-width network directory row — real card, no fabricated stats: name/role/skills all
  * come straight off the person's own profile, and the connect button reflects their actual
@@ -24,9 +25,7 @@ export function PersonListCard({
     <Pressable onPress={onPress} style={styles.touch} accessibilityRole="button">
       <CyberCutBox cutSize={12} radius={8} fill="rgba(14, 20, 35, 0.85)" style={styles.cut}>
         <View style={styles.inner}>
-          <View style={[styles.avatarBox, isLight && { backgroundColor: colors.surfaceElevated }]}>
-            <Image source={getCyberAvatarSource(person.id)} style={styles.avatarImg} />
-          </View>
+          <CutAvatar source={resolveAvatarSource(person.avatarUri, person.avatarId)} size={48} cut={12} borderWidth={1} fill={isLight ? colors.surfaceElevated : '#161B2E'} />
 
           <View style={styles.info}>
             <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{person.displayName}</Text>

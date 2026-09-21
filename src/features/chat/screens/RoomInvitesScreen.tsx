@@ -2,6 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { BladeCard } from '../../../components/cards/BladeCard';
 import { EmptyState } from '../../../components/feedback/EmptyState';
@@ -25,8 +26,12 @@ export function RoomInvitesScreen() {
     if (user) fetchMyRoomInvites(user.id);
   }, [user, fetchMyRoomInvites]);
 
+  const refreshControl = useRefreshControl(async () => {
+    if (user) await fetchMyRoomInvites(user.id);
+  });
+
   return (
-    <Screen>
+    <Screen refreshControl={refreshControl}>
       <ScreenHeader title="Room invites" onBack={() => nav.goBack()} />
       {loading ? <Skeleton width="100%" height={72} /> : null}
       {!loading && invites.length === 0 ? <EmptyState title="No pending room invites." /> : null}

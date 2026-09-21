@@ -1,6 +1,13 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { DemoVideoPlayer } from '../../../components/media/DemoVideoPlayer';
+import { openExternalUrl } from '../../../utils/openUrl';
+import { normalizeUrl } from '../../../utils/validation';
+import { ImageViewerModal } from '../../../components/media/ImageViewerModal';
+import { ChipPicker } from '../../../components/inputs/ChipPicker';
+import { DEMO_ENGINES, DEMO_GENRES, DEMO_PLATFORMS, DEMO_TAGS, splitGenreEngine } from '../../../data/demoOptions';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Dimensions,
@@ -9,7 +16,6 @@ import {
   Linking,
   Platform,
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -20,10 +26,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import type { MainStackParamList } from '../../../navigation/types';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
-import { InlineVideoPlayer } from '../../../components/media/InlineVideoPlayer';
 import { DemoThumb } from '../../../components/media/DemoThumb';
 import { AvatarRing } from '../../../components/avatars/AvatarRing';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
@@ -32,8 +38,9 @@ import { EmptyState } from '../../../components/feedback/EmptyState';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { CyberButton } from '../../../components/cyber/CyberButton';
 import { RubricInput } from '../../../components/inputs/RubricInput';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSourceLoose } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
+import { useSingleFlight } from '../../../hooks/useSingleFlight';
 import { useDemoStore } from '../../../store/demoStore';
 import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -42,6 +49,8 @@ import { deleteObjectByPublicUrl, uploadDemoScreenshot, uploadDemoThumbnail, upl
 import { fonts, useTheme } from '../../../theme';
 import { formatCount, formatDuration, formatTime } from '../../../utils/format';
 import { EMPTY_ARRAY } from '../../../utils/emptyArray';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -80,10 +89,12 @@ export function DemoDetailScreen() {
   }, [demosLoaded, fetchDemos]);
 
   const [playing, setPlaying] = useState(false);
+  const [videoStarted, setVideoStarted] = useState(false);
   const [text, setText] = useState('');
   const [commentErr, setCommentErr] = useState('');
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [editScreenshots, setEditScreenshots] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [uploadingScreenshot, setUploadingScreenshot] = useState(false);
   const hasCountedPlay = useRef(false);
 
@@ -97,6 +108,12 @@ export function DemoDetailScreen() {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editExternalUrl, setEditExternalUrl] = useState('');
+  const [editGenre, setEditGenre] = useState('');
+  const [editEngine, setEditEngine] = useState('');
+  const [editPlatforms, setEditPlatforms] = useState<string[]>([]);
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [editPortfolio, setEditPortfolio] = useState('');
+  const [editPressKit, setEditPressKit] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteReviewConfirm, setDeleteReviewConfirm] = useState(false);
@@ -113,6 +130,16 @@ export function DemoDetailScreen() {
       ensureBookmarksLoaded(user.id);
     }
   }, [id, user, fetchComments, fetchMyReview, fetchReviews, ensureBookmarksLoaded]);
+
+  const refreshControl = useRefreshControl(async () => {
+    if (!id) return;
+    await Promise.all([
+      fetchDemos(),
+      fetchComments(id),
+      fetchReviews(id, user?.id),
+      user ? fetchMyReview(id, user.id) : Promise.resolve(),
+    ]);
+  });
 
   useEffect(() => {
     if (myReview) {
@@ -175,10 +202,19 @@ export function DemoDetailScreen() {
     }
   };
 
+  const { run: runPostComment, pending: postingComment } = useSingleFlight(postComment);
+
   const startEditing = () => {
     setEditTitle(demo.title);
     setEditDescription(demo.description);
     setEditExternalUrl(demo.externalUrl ?? '');
+    const { genre, engine } = splitGenreEngine(demo.genre);
+    setEditGenre(genre);
+    setEditEngine(engine);
+    setEditPlatforms(demo.platforms ?? []);
+    setEditTags(demo.tags ?? []);
+    setEditPortfolio(demo.portfolioUrl ?? '');
+    setEditPressKit(demo.pressKitUrl ?? '');
     setEditScreenshots(demo.screenshotUrls ?? []);
     setEditing(true);
   };
@@ -190,8 +226,13 @@ export function DemoDetailScreen() {
       await updateDemoAction(demo.id, {
         title: editTitle.trim(),
         description: editDescription.trim(),
-        externalUrl: editExternalUrl.trim() || null,
+        externalUrl: normalizeUrl(editExternalUrl) || null,
         screenshotUrls: editScreenshots,
+        genre: editEngine ? `${editGenre} · ${editEngine}` : editGenre,
+        platforms: editPlatforms,
+        tags: editTags,
+        portfolioUrl: normalizeUrl(editPortfolio) || null,
+        pressKitUrl: normalizeUrl(editPressKit) || null,
       });
       setEditing(false);
     } finally {
@@ -215,13 +256,26 @@ export function DemoDetailScreen() {
   };
 
   // Adds or replaces the demo's video after the fact — a demo published without one (build
-  // link only) previously had no way to ever get a video. Same 30s–2min limit as the upload
+  // link only) previously had no way to ever get a video. Same up-to-1-minute limit as the upload
   // screen (demos_duration_range), committed immediately rather than waiting on "Save".
   const pickDemoVideo = async () => {
     if (!user || videoBusy) return;
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'] });
     if (res.canceled || !res.assets[0]) return;
-    const asset = res.assets[0];
+    await replaceDemoVideo(res.assets[0]);
+  };
+
+  // Same "Choose File" fallback the upload screen has — the photo library picker can be empty
+  // (no videos in Photos / simulator) while the video still exists in Files/iCloud.
+  const pickDemoVideoFromFiles = async () => {
+    if (!user || videoBusy) return;
+    const res = await DocumentPicker.getDocumentAsync({ type: 'video/*', copyToCacheDirectory: true });
+    if (res.canceled || !res.assets[0]) return;
+    await replaceDemoVideo({ uri: res.assets[0].uri });
+  };
+
+  const replaceDemoVideo = async (asset: { uri: string; duration?: number | null }) => {
+    if (!user) return;
     setVideoErr('');
     setVideoBusy(true);
     let newVideoUrl: string | undefined;
@@ -241,17 +295,17 @@ export function DemoDetailScreen() {
         });
       }
       sec = Math.round(sec);
-      if (sec < 30) throw new Error('Video is too short — must be at least 30s.');
-      if (sec > 120) throw new Error('Video is too long — must be 2 minutes or less.');
+      if (sec < 1) throw new Error('Could not read this video — pick a different file.');
+      if (sec > 60) throw new Error('Video is too long — must be 1 minute or less.');
 
       newVideoUrl = await uploadDemoVideo(user.id, `${demo.id}-${Date.now()}`, asset.uri);
-      if (!demo.thumbnail) {
-        try {
-          const { uri } = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 1000 });
-          newThumbUrl = await uploadDemoThumbnail(user.id, `${demo.id}-${Date.now()}`, uri);
-        } catch {
-          // no cover frame — keeps the placeholder
-        }
+      // Always refresh the cover from the new video — keeping the old thumbnail made the demo
+      // look like the replace hadn't worked (the cover is what the feed and hero show).
+      try {
+        const { uri } = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 1000 });
+        newThumbUrl = await uploadDemoThumbnail(user.id, `${demo.id}-${Date.now()}`, uri);
+      } catch {
+        // no cover frame — keeps the existing cover
       }
       const oldVideo = demo.videoUrl;
       await updateDemoAction(demo.id, {
@@ -318,15 +372,21 @@ export function DemoDetailScreen() {
 
   const startPlaying = () => {
     countPlayOnce();
+    setVideoStarted(true);
     setPlaying(true);
   };
 
+  // The uploaded video is what "Play demo" plays (and it toggles to Pause while running). The
+  // external build link is only the action when there's no video — it used to win even when a
+  // video existed, so the button never played it. The link is still reachable from the
+  // developer card.
   const handlePlayAction = () => {
-    if (demo.externalUrl) {
+    if (demo.videoUrl) {
+      if (playing) setPlaying(false);
+      else startPlaying();
+    } else if (demo.externalUrl) {
       countPlayOnce();
-      Linking.openURL(demo.externalUrl);
-    } else {
-      startPlaying();
+      openExternalUrl(demo.externalUrl);
     }
   };
 
@@ -334,15 +394,17 @@ export function DemoDetailScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CyberBackground showArtwork={false} />
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
+        refreshControl={refreshControl}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Banner Area */}
         <View style={styles.heroContainer}>
-          {playing && demo.videoUrl ? (
+          {videoStarted && demo.videoUrl ? (
             <View style={styles.videoPlayerWrap}>
-              <InlineVideoPlayer uri={demo.videoUrl} playing muted={false} height={280} />
+              <DemoVideoPlayer uri={demo.videoUrl} playing={playing} onPlayingChange={setPlaying} height={280} />
             </View>
           ) : (
             <View style={styles.heroImageWrap}>
@@ -466,19 +528,55 @@ export function DemoDetailScreen() {
                 onChangeText={setEditExternalUrl}
                 autoCapitalize="none"
               />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <AuthTextField label="Portfolio" value={editPortfolio} onChangeText={setEditPortfolio} autoCapitalize="none" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AuthTextField label="Press kit" value={editPressKit} onChangeText={setEditPressKit} autoCapitalize="none" />
+                </View>
+              </View>
+
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Genre</Text>
+              <ChipPicker options={DEMO_GENRES} selected={editGenre ? [editGenre] : []} onToggle={setEditGenre} allowCustom />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Engine</Text>
+              <ChipPicker options={DEMO_ENGINES} selected={editEngine ? [editEngine] : []} onToggle={setEditEngine} allowCustom />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Platforms</Text>
+              <ChipPicker
+                options={DEMO_PLATFORMS}
+                selected={editPlatforms}
+                onToggle={(v) => setEditPlatforms((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]))}
+              />
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Tags</Text>
+              <ChipPicker
+                options={DEMO_TAGS}
+                selected={editTags}
+                allowCustom
+                onToggle={(v) =>
+                  setEditTags((p) => {
+                    const t = v.toUpperCase();
+                    return p.includes(t) ? p.filter((x) => x !== t) : [...p, t];
+                  })
+                }
+              />
 
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Demo video</Text>
               <Pressable onPress={pickDemoVideo} disabled={videoBusy} style={styles.videoBtnTouch} accessibilityRole="button">
                 <CyberCutBox cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.cancelCut}>
                   <Text style={[styles.cancelBtnText, { color: colors.primary }]}>
-                    {videoBusy ? 'Uploading video…' : demo.videoUrl ? 'Replace video (30s–2min)' : 'Add video (30s–2min)'}
+                    {videoBusy ? 'Uploading video…' : demo.videoUrl ? 'Replace video (up to 1 min)' : 'Add video (up to 1 min)'}
                   </Text>
+                </CyberCutBox>
+              </Pressable>
+              <Pressable onPress={pickDemoVideoFromFiles} disabled={videoBusy} style={styles.videoBtnTouch} accessibilityRole="button">
+                <CyberCutBox cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.cancelCut}>
+                  <Text style={[styles.cancelBtnText, { color: colors.primary }]}>Choose from Files</Text>
                 </CyberCutBox>
               </Pressable>
               {videoErr ? <InlineErrorText message={videoErr} /> : null}
 
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Screenshots</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
+              <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
                 {editScreenshots.map((url) => (
                   <View key={url} style={styles.editScreenshotWrap}>
                     <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
@@ -492,7 +590,7 @@ export function DemoDetailScreen() {
                     <Ionicons name={uploadingScreenshot ? 'hourglass-outline' : 'add'} size={22} color={colors.primary} />
                   </Pressable>
                 ) : null}
-              </ScrollView>
+              </KeyboardAwareScrollView>
 
               <View style={styles.editBtnRow}>
                 <CyberButton
@@ -521,12 +619,7 @@ export function DemoDetailScreen() {
             style={styles.developerCard}
           >
             <View style={styles.developerCardInner}>
-              <View style={[styles.devAvatarWrap, { borderColor: colors.primary }]}>
-                <Image
-                  source={getCyberAvatarSource(demo.developerAvatar)}
-                  style={styles.devAvatarImg}
-                />
-              </View>
+              <CutAvatar source={resolveAvatarSourceLoose(demo.developerAvatar)} size={46} cut={12} borderColor={colors.primary} borderWidth={1.5} />
 
               <View style={styles.devInfoWrap}>
                 <Text style={[styles.devTag, { color: colors.primary }]}>DEVELOPER</Text>
@@ -535,7 +628,7 @@ export function DemoDetailScreen() {
                 </Text>
                 {demo.externalUrl ? (
                   <View style={styles.devLinksRow}>
-                    <Pressable onPress={() => Linking.openURL(demo.externalUrl!)}>
+                    <Pressable onPress={() => openExternalUrl(demo.externalUrl)}>
                       <Text style={[styles.devLinkText, { color: colors.muted2 }]}>{demo.externalUrl.replace(/^https?:\/\//, '').split('/')[0]}</Text>
                     </Pressable>
                   </View>
@@ -592,6 +685,11 @@ export function DemoDetailScreen() {
             <View style={[styles.tagPill, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]}>
               <Text style={[styles.tagText, { color: colors.primary }]}>{(demo.genre || 'GENRE').toUpperCase()}</Text>
             </View>
+            {[...(demo.platforms ?? []), ...(demo.tags ?? [])].map((t, i) => (
+              <View key={`${t}-${i}`} style={[styles.tagPill, { backgroundColor: colors.cardBorder, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.tagText, { color: colors.primary }]}>{t}</Text>
+              </View>
+            ))}
           </View>
 
           {/* Screenshots Section */}
@@ -606,21 +704,22 @@ export function DemoDetailScreen() {
           </View>
 
           {(demo.screenshotUrls?.length ?? 0) > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
-              {demo.screenshotUrls!.map((url) => (
-                <CyberCutBox
-                  key={url}
-                  cutSize={10}
-                  radius={6}
-                  fill={colors.cardFill}
-                  borderColor={colors.cardBorder}
-                  borderWidth={1}
-                  style={styles.screenshotFrame}
-                >
-                  <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
-                </CyberCutBox>
+            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
+              {demo.screenshotUrls!.map((url, i) => (
+                <Pressable key={url} onPress={() => setViewerIndex(i)} accessibilityRole="button" accessibilityLabel={`View screenshot ${i + 1} full size`}>
+                  <CyberCutBox
+                    cutSize={10}
+                    radius={6}
+                    fill={colors.cardFill}
+                    borderColor={colors.cardBorder}
+                    borderWidth={1}
+                    style={styles.screenshotFrame}
+                  >
+                    <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
+                  </CyberCutBox>
+                </Pressable>
               ))}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           ) : (
             <Text style={[styles.noCommentsText, { color: colors.muted2 }]}>
               {isOwnDemo ? 'No screenshots yet — add some from the edit screen.' : 'No screenshots yet.'}
@@ -849,14 +948,14 @@ export function DemoDetailScreen() {
                   placeholderTextColor={colors.muted2}
                   style={[styles.composerInput, { color: colors.text }]}
                 />
-                <Pressable onPress={postComment} style={styles.postBtn}>
-                  <Text style={[styles.postBtnText, { color: colors.primary }]}>Post</Text>
+                <Pressable onPress={runPostComment} disabled={postingComment} style={styles.postBtn} accessibilityRole="button" accessibilityState={{ busy: postingComment }}>
+                  <Text style={[styles.postBtnText, { color: colors.primary }]}>{postingComment ? 'Posting…' : 'Post'}</Text>
                 </Pressable>
               </View>
             </CyberCutBox>
           </KeyboardAvoidingView>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Docked Sticky Bottom Bar */}
       <View style={[styles.bottomDockedBar, { paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.surface, borderTopColor: colors.cardBorder }]}>
@@ -886,7 +985,7 @@ export function DemoDetailScreen() {
           disabled={!demo.videoUrl && !demo.externalUrl}
           style={[styles.playDockedTouch, !demo.videoUrl && !demo.externalUrl && { opacity: 0.4 }]}
           accessibilityRole="button"
-          accessibilityLabel="Play demo"
+          accessibilityLabel={demo.videoUrl && playing ? 'Pause demo' : 'Play demo'}
         >
           <CyberCutBox
             cutSize={10}
@@ -902,8 +1001,10 @@ export function DemoDetailScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.playDockedGradient}
             >
-              <Ionicons name="play" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-              <Text style={styles.playDockedText}>Play demo · {formatDuration(demo.durationSec)}</Text>
+              <Ionicons name={demo.videoUrl && playing ? 'pause' : 'play'} size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.playDockedText}>
+                {demo.videoUrl && playing ? 'Pause' : `Play demo · ${formatDuration(demo.durationSec)}`}
+              </Text>
             </LinearGradient>
           </CyberCutBox>
         </Pressable>
@@ -948,6 +1049,7 @@ export function DemoDetailScreen() {
           setDeleteCommentId(null);
         }}
       />
+      <ImageViewerModal urls={demo.screenshotUrls ?? []} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
     </View>
   );
 }

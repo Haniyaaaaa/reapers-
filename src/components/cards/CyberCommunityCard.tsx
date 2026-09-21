@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
@@ -8,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { CyberCutBox } from '../cyber/CyberCutBox';
+import { CutAvatar } from '../avatars/CutAvatar';
 import { fonts, useTheme } from '../../theme';
 
 const DEFAULT_COMMUNITY_AVATAR = require('../../../assets/avatars/extracted/male_4.jpg');
@@ -39,17 +39,25 @@ export function CyberCommunityCard({
   return (
     <Pressable onPress={onPress} style={styles.cardContainer} accessibilityRole="button">
       <CyberCutBox
-        cutSize={12}
-        radius={5}
-        fill="rgba(14, 20, 35, 0.85)"
+        cutSize={18}
+        radius={6}
+        fill={isLight ? colors.cardFill : 'rgba(18, 14, 36, 0.6)'}
+        borderColor={isLight ? colors.cardBorder : 'rgba(168, 85, 247, 0.2)'}
+        borderWidth={1}
+        glass
         style={styles.cutCard}
       >
         <View style={styles.cardInner}>
           {/* Top Identity Row */}
           <View style={styles.headerRow}>
-            <View style={[styles.avatarBox, isLight && { backgroundColor: colors.surfaceElevated, borderColor: colors.cardBorder }]}>
-              <Image source={resolvedSource} style={styles.avatarImg} />
-            </View>
+            <CutAvatar
+              source={resolvedSource}
+              size={44}
+              cut={11}
+              borderWidth={1}
+              borderColor={isLight ? colors.cardBorder : 'rgba(192, 132, 252, 0.4)'}
+              fill={isLight ? colors.surfaceElevated : '#161B2E'}
+            />
             <View style={styles.headerInfo}>
               <Text style={[styles.nameText, { color: colors.text }]} numberOfLines={1}>
                 {name}
@@ -109,7 +117,7 @@ const styles = StyleSheet.create({
   },
   cutCard: {
     width: '100%',
-    padding: 12,
+    padding: 14,
   },
   cardInner: {
     width: '100%',

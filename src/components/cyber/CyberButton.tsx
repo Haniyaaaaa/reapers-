@@ -9,12 +9,16 @@ import {
   ViewStyle,
 } from 'react-native';
 import { fonts } from '../../theme';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
 import { CyberCutBox } from './CyberCutBox';
 
 interface CyberButtonProps {
   label: string;
-  onPress: () => void;
+  /** If this returns a promise the button shows a spinner and ignores taps until it settles. */
+  onPress: () => unknown;
   loading?: boolean;
+  /** Status text shown next to the spinner while busy, e.g. "Saving…". */
+  loadingLabel?: string;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
   height?: number;
@@ -25,15 +29,18 @@ export function CyberButton({
   label,
   onPress,
   loading = false,
+  loadingLabel = 'Please wait…',
   disabled = false,
   style,
   height = 50,
   cutSize = 14,
 }: CyberButtonProps) {
+  const { run, pending } = useSingleFlight(onPress);
+  const busy = loading || pending;
   return (
     <Pressable
-      onPress={onPress}
-      disabled={disabled || loading}
+      onPress={run}
+      disabled={disabled || busy}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => [
@@ -50,8 +57,11 @@ export function CyberButton({
         style={[styles.box, { height }]}
       >
         <View style={styles.inner}>
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
+          {busy ? (
+            <View style={styles.busyRow}>
+              <ActivityIndicator color="#FFFFFF" size="small" />
+              <Text style={styles.label}>{loadingLabel}</Text>
+            </View>
           ) : (
             <Text style={styles.label}>{label}</Text>
           )}
@@ -62,6 +72,7 @@ export function CyberButton({
 }
 
 const styles = StyleSheet.create({
+  busyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   outer: {
     width: '100%',
     shadowColor: '#6D35FF',

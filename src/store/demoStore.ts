@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as demosApi from '../services/supabase/demos';
 import { deleteObjectByPublicUrl } from '../services/supabase/storage';
 import { captureException, track } from '../services/analytics/analytics';
@@ -6,7 +7,7 @@ import type { DemoReviewRow } from '../services/supabase/types';
 import type { Demo, RubricScores } from '../types/demo';
 import type { DemoComment, Review } from '../types/extra';
 
-type DemoFilter = { sort?: 'new' | 'top_rated'; jamOnly?: boolean };
+type DemoFilter = demosApi.DemoFilters;
 
 type DemoState = {
   demos: Demo[];
@@ -20,7 +21,7 @@ type DemoState = {
   reviews: Record<string, Review[]>;
   bookmarkedIds: Set<string>;
   bookmarksLoaded: boolean;
-  fetchDemos: (filter?: DemoFilter) => Promise<void>;
+  fetchDemos: (filter?: DemoFilter, opts?: FetchOpts) => Promise<void>;
   loadMoreDemos: () => Promise<void>;
   fetchDemosByDeveloper: (developerId: string) => Promise<void>;
   createDemo: (input: {
@@ -34,6 +35,10 @@ type DemoState = {
     externalUrl?: string;
     isJamEntry?: boolean;
     screenshotUrls?: string[];
+    tags?: string[];
+    platforms?: string[];
+    portfolioUrl?: string;
+    pressKitUrl?: string;
   }) => Promise<Demo>;
   fetchComments: (demoId: string) => Promise<void>;
   addComment: (demoId: string, userId: string, text: string) => Promise<void>;
@@ -52,6 +57,10 @@ type DemoState = {
       videoUrl?: string | null;
       thumbnailUrl?: string | null;
       durationSec?: number;
+      tags?: string[];
+      platforms?: string[];
+      portfolioUrl?: string | null;
+      pressKitUrl?: string | null;
     },
   ) => Promise<void>;
   deleteDemo: (id: string) => Promise<void>;
@@ -84,15 +93,23 @@ export const useDemoStore = create<DemoState>((set, get) => ({
   bookmarkedIds: new Set(),
   bookmarksLoaded: false,
 
-  fetchDemos: async (filter = {}) => {
-    set({ loading: true, error: null, demosFilter: filter });
-    try {
-      const { rows, hasMore } = await demosApi.listDemos(0, undefined, filter);
-      set({ demos: rows, demosHasMore: hasMore, loading: false });
-    } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load demos' });
-    }
-  },
+  fetchDemos: (filter = {}, opts) =>
+    swr(
+      `demos:${JSON.stringify(filter)}`,
+      async () => {
+        // A different filter is a different list, so show loading for it; a plain refresh stays visible.
+        set((s) => ({ loading: s.demos.length === 0 || JSON.stringify(s.demosFilter) !== JSON.stringify(filter), error: null, demosFilter: filter }));
+        try {
+          const { rows, hasMore } = await demosApi.listDemos(0, undefined, filter);
+          set((s) => ({ demos: reconcile(s.demos, rows), demosHasMore: hasMore, loading: false }));
+          return true;
+        } catch (err) {
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load demos' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMoreDemos: async () => {
     try {
@@ -127,6 +144,10 @@ export const useDemoStore = create<DemoState>((set, get) => ({
         external_url: input.externalUrl,
         is_jam_entry: input.isJamEntry,
         screenshot_urls: input.screenshotUrls,
+        tags: input.tags,
+        platforms: input.platforms,
+        portfolio_url: input.portfolioUrl,
+        press_kit_url: input.pressKitUrl,
       });
       set((s) => ({ demos: [demo, ...s.demos] }));
       track('demo_uploaded', { genre: input.genre });
@@ -207,6 +228,10 @@ export const useDemoStore = create<DemoState>((set, get) => ({
         video_url: patch.videoUrl,
         thumbnail_url: patch.thumbnailUrl,
         duration_sec: patch.durationSec,
+        tags: patch.tags,
+        platforms: patch.platforms,
+        portfolio_url: patch.portfolioUrl,
+        press_kit_url: patch.pressKitUrl,
       });
       set((s) => ({ demos: upsertDemo(s.demos, demo) }));
     } catch (err) {

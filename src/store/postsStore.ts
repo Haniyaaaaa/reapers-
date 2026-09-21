@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as postsApi from '../services/supabase/posts';
 import { captureException } from '../services/analytics/analytics';
 import { playSound } from '../services/sound';
@@ -26,7 +27,7 @@ type PostsState = {
   fetchMyPosts: (userId: string) => Promise<void>;
   loadMoreMyPosts: (userId: string) => Promise<void>;
 
-  fetchFeed: (myUserId: string) => Promise<void>;
+  fetchFeed: (myUserId: string, opts?: FetchOpts) => Promise<void>;
   loadMorePosts: (myUserId: string) => Promise<void>;
   checkForNewPosts: () => Promise<void>;
   loadNewPosts: (myUserId: string) => Promise<void>;
@@ -85,16 +86,23 @@ export const usePostsStore = create<PostsState>((set, get) => ({
     }
   },
 
-  fetchFeed: async (myUserId) => {
-    set({ loading: true, error: null });
-    try {
-      const { rows, hasMore } = await postsApi.listFeed(myUserId);
-      set({ posts: rows, hasMore, loading: false, newestKnownCreatedAt: rows[0]?.createdAt ?? get().newestKnownCreatedAt, newPostsAvailable: false });
-    } catch (err) {
-      captureException(err);
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load feed' });
-    }
-  },
+  fetchFeed: (myUserId, opts) =>
+    swr(
+      `feed:${myUserId}`,
+      async () => {
+        set((s) => ({ loading: s.posts.length === 0, error: null }));
+        try {
+          const { rows, hasMore } = await postsApi.listFeed(myUserId);
+          set((s) => ({ posts: reconcile(s.posts, rows), hasMore, loading: false, newestKnownCreatedAt: rows[0]?.createdAt ?? s.newestKnownCreatedAt, newPostsAvailable: false }));
+          return true;
+        } catch (err) {
+          captureException(err);
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load feed' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMorePosts: async (myUserId) => {
     const { posts, hasMore, loading } = get();

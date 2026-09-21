@@ -6,12 +6,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { errorMessage } from '../../../utils/errorMessage';
+import { COMMUNITY_TAGS } from '../../../data/communityTags';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,20 +28,12 @@ import { useCommunitiesStore } from '../../../store/communitiesStore';
 import { uploadImage } from '../../../services/supabase/storage';
 import type { MainStackParamList } from '../../../navigation/types';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 32, 430);
 
-const AVAILABLE_TAGS = [
-  'UNITY',
-  'UNREAL',
-  'GODOT',
-  '2D ART',
-  'AUDIO',
-  'NETCODE',
-  'PUBLISHING',
-  'PLAY TESTING',
-];
+const AVAILABLE_TAGS = COMMUNITY_TAGS;
 
 const CATEGORIES = ['Engines', 'Indie', 'Audio', '3D Art', 'Netcode', 'Publishing'];
 
@@ -74,7 +67,9 @@ export function CreateCommunityScreen() {
   );
   const [category, setCategory] = useState('Engines');
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [city, setCity] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>(['UNITY', 'PLAY TESTING']);
+  const [customTag, setCustomTag] = useState('');
   const [privacy, setPrivacy] = useState<'public' | 'invite_only'>('public');
   const [rules, setRules] = useState(DEFAULT_RULES);
 
@@ -85,6 +80,13 @@ export function CreateCommunityScreen() {
     setSelectedTags((prev) =>
       prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
     );
+  };
+
+  const addCustomTag = () => {
+    const t = customTag.trim().toUpperCase();
+    if (!t) return;
+    setSelectedTags((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    setCustomTag('');
   };
 
   const pickImage = async () => {
@@ -130,11 +132,13 @@ export function CreateCommunityScreen() {
         name: name.trim(),
         description: description.trim(),
         logoUrl: uploadedLogoUrl,
+        location: city.trim() || undefined,
+        tags: selectedTags,
       });
 
       nav.replace('CommunityDetail', { id: community.id });
     } catch (e) {
-      setSubmitErr(e instanceof Error ? e.message : 'Could not create community');
+      setSubmitErr(errorMessage(e, 'Could not create community'));
     } finally {
       setSubmitting(false);
     }
@@ -149,7 +153,7 @@ export function CreateCommunityScreen() {
     >
       <CyberBackground />
 
-      <ScrollView
+      <KeyboardAwareScrollView
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -262,7 +266,7 @@ export function CreateCommunityScreen() {
                 value={name}
                 onChangeText={setName}
                 maxLength={40}
-                placeholder="e.g. Salvage Crew Devs"
+                placeholder="e.g. Lahore Game Devs"
                 placeholderTextColor={colors.muted2}
                 style={[styles.textInput, { color: colors.text }]}
               />
@@ -296,6 +300,24 @@ export function CreateCommunityScreen() {
                 placeholderTextColor={colors.muted2}
                 style={[styles.textAreaInput, { color: colors.text }]}
                 textAlignVertical="top"
+              />
+            </CyberCutBox>
+          </View>
+
+          {/* City — what the Communities location filter and search match against */}
+          <View style={styles.fieldBlock}>
+            <View style={styles.labelRow}>
+              <Text style={[styles.fieldLabel, { color: colors.muted }]}>CITY</Text>
+              <Text style={[styles.hintText, { color: colors.muted2 }]}>optional · helps people nearby find you</Text>
+            </View>
+            <CyberCutBox cutSize={10} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.cityCut}>
+              <TextInput
+                value={city}
+                onChangeText={(v) => setCity(v.slice(0, 60))}
+                placeholder="e.g. Lahore"
+                placeholderTextColor={colors.muted2}
+                autoCorrect={false}
+                style={[styles.cityInput, { color: colors.text }]}
               />
             </CyberCutBox>
           </View>
@@ -379,7 +401,7 @@ export function CreateCommunityScreen() {
             </View>
 
             <View style={styles.tagsFlowRow}>
-              {AVAILABLE_TAGS.map((tag) => {
+              {[...AVAILABLE_TAGS, ...selectedTags.filter((t) => !AVAILABLE_TAGS.includes(t))].map((tag) => {
                 const isSelected = selectedTags.includes(tag);
                 return (
                   <Pressable
@@ -419,6 +441,35 @@ export function CreateCommunityScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+
+            {/* Add your own tag — the presets are a starting point, not the only options. */}
+            <View style={styles.customTagRow}>
+              <CyberCutBox
+                cutSize={8}
+                radius={4}
+                fill={colors.inputFill}
+                borderColor={colors.inputBorder}
+                borderWidth={1}
+                style={styles.customTagInputCut}
+              >
+                <TextInput
+                  value={customTag}
+                  onChangeText={setCustomTag}
+                  placeholder="Add your own tag"
+                  placeholderTextColor={colors.muted2}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={24}
+                  onSubmitEditing={addCustomTag}
+                  style={[styles.customTagInput, { color: colors.text }]}
+                />
+              </CyberCutBox>
+              <Pressable onPress={addCustomTag} style={styles.customTagAddTouch} accessibilityRole="button" accessibilityLabel="Add tag">
+                <CyberCutBox gradient cutSize={6} radius={4} style={styles.customTagAddCut}>
+                  <Text style={styles.customTagAddText}>ADD</Text>
+                </CyberCutBox>
+              </Pressable>
             </View>
           </View>
 
@@ -531,7 +582,7 @@ export function CreateCommunityScreen() {
             </View>
           ) : null}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* ================= 10. BOTTOM ACTION BAR ================= */}
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.surface, borderTopColor: colors.cardBorder }]}>
@@ -581,6 +632,8 @@ export function CreateCommunityScreen() {
 }
 
 const styles = StyleSheet.create({
+  cityCut: { height: 48 },
+  cityInput: { flex: 1, fontFamily: fonts.body, fontSize: 15, paddingHorizontal: 14, paddingVertical: 0 },
   container: {
     flex: 1,
     backgroundColor: '#090F1C',
@@ -791,6 +844,12 @@ const styles = StyleSheet.create({
     color: '#00E5FF',
     fontWeight: '700',
   },
+  customTagRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  customTagInputCut: { flex: 1, height: 40 },
+  customTagInput: { flex: 1, fontFamily: fonts.body, fontSize: 13, paddingHorizontal: 12, paddingVertical: 0 },
+  customTagAddTouch: { width: 64, height: 40 },
+  customTagAddCut: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  customTagAddText: { fontFamily: fonts.monoBold, fontSize: 11, letterSpacing: 0.8, color: '#FFFFFF' },
   tagsFlowRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

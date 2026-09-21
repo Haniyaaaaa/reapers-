@@ -3,7 +3,6 @@ import {
   Dimensions,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,25 +14,30 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Location from 'expo-location';
 
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { CyberEventCard } from '../../../components/cards/CyberEventCard';
+import { AutoCarousel } from '../../../components/layout/AutoCarousel';
 import { CyberEventRowCard } from '../../../components/cards/CyberEventRowCard';
 import { CyberFilterModal, type FilterState } from '../../../components/cyber/CyberFilterModal';
 import { useAuth } from '../../../hooks/useAuth';
 import { useEventStore } from '../../../store/eventStore';
+import { STALE_MS } from '../../../store/swr';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchEvents } from '../../../services/supabase/events';
 import { matchesEventFilters } from '../../../utils/eventFilters';
+import { formatEventBadge } from '../../../utils/eventBadge';
 import type { MainStackParamList, TabParamList } from '../../../navigation/types';
 import type { GameEvent } from '../../../types/event';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 32, 430);
 
-const CATEGORY_CHIPS = ['ALL', 'WATCH PARTY', 'MEETUP', 'TOURNAMENT', 'GAME JAM'];
+const CATEGORY_CHIPS = ['ALL', 'MEETUP', 'TOURNAMENT', 'GAME JAM'];
 const MODES = ['Online', 'Hybrid', 'In person'] as const;
 
 type Nav = CompositeNavigationProp<
@@ -57,27 +61,10 @@ export function EventHubScreen() {
   const [selectedMode, setSelectedMode] = useState<(typeof MODES)[number] | 'ALL'>('Online');
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<FilterState | null>(null);
-  const [viewerCoords, setViewerCoords] = useState<{ lat: number; lng: number } | undefined>();
-
-  // Only requested when the "within 50km" option is actually picked — no reason to prompt for
-  // location permission otherwise.
-  useEffect(() => {
-    if (advancedFilters?.location !== 'WITHIN 50KM' || viewerCoords) return;
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
-        const pos = await Location.getCurrentPositionAsync({});
-        setViewerCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-      } catch {
-        // Best-effort — falls back to matchesEventFilters' pass-through when coords are unset.
-      }
-    })();
-  }, [advancedFilters, viewerCoords]);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (user?.id) fetchEvents(user.id);
+    if (user?.id) fetchEvents(user.id, { ifStaleMs: STALE_MS });
   }, [user?.id, fetchEvents]);
 
   const onRefresh = useCallback(async () => {
@@ -90,13 +77,19 @@ export function EventHubScreen() {
     }
   }, [user?.id, fetchEvents]);
 
+  // Search asks the server so it finds events beyond the page already loaded; until its answer
+  // arrives the loaded events are filtered locally.
+  const search = useServerSearch(dq, (n) => searchEvents(user?.id ?? '', n), { enabled: !!user?.id });
+
   // Derived filter matching
   const filteredEvents = useMemo(() => {
-    const needle = dq.trim().toLowerCase();
-    return events.filter((e) => {
-      // 1. Search Query
+    const needle = search.needle;
+    const source = search.results ?? events;
+    return source.filter((e) => {
+      // 1. Search Query — already applied by the server when its results are in
       const matchesSearch =
         !needle ||
+        search.results !== null ||
         e.title.toLowerCase().includes(needle) ||
         (e.description && e.description.toLowerCase().includes(needle)) ||
         (e.location && e.location.toLowerCase().includes(needle)) ||
@@ -122,15 +115,16 @@ export function EventHubScreen() {
       }
 
       // 4. Advanced Filter Sheet (date/location/category)
-      if (advancedFilters && !matchesEventFilters(e, advancedFilters, viewerCoords)) return false;
+      if (advancedFilters && !matchesEventFilters(e, advancedFilters)) return false;
 
       return true;
     });
-  }, [events, dq, selectedCat, selectedMode, advancedFilters, viewerCoords]);
+  }, [events, search.needle, search.results, selectedCat, selectedMode, advancedFilters]);
 
   // Sort upcoming events chronologically
   const sortedUpcoming = useMemo(() => {
-    return [...filteredEvents].sort(
+    const cutoff = Date.now() - 3 * 60 * 60 * 1000;
+    return filteredEvents.filter((e) => new Date(e.startsAt).getTime() >= cutoff).sort(
       (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
     );
   }, [filteredEvents]);
@@ -155,7 +149,8 @@ export function EventHubScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CyberBackground />
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -179,7 +174,7 @@ export function EventHubScreen() {
             <View style={styles.headerTitleWrap}>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Events</Text>
               <Text style={[styles.headerSubtitle, { color: colors.muted }]}>
-                SEP - OCT 2026 · BERLIN &amp; ONLINE
+                {new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toUpperCase()} · {sortedUpcoming.length} UPCOMING
               </Text>
             </View>
 
@@ -218,7 +213,7 @@ export function EventHubScreen() {
                   <TextInput
                     value={q}
                     onChangeText={setQ}
-                    placeholder="Search communities, demos, experts..."
+                    placeholder="Search events..."
                     placeholderTextColor={colors.muted2}
                     style={[styles.searchInput, { color: colors.text }]}
                     returnKeyType="search"
@@ -253,7 +248,8 @@ export function EventHubScreen() {
           </View>
 
           {/* ================= 3. CATEGORY CHIPS ================= */}
-          <ScrollView
+          <KeyboardAwareScrollView
+            keyboardShouldPersistTaps="handled"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}
@@ -288,7 +284,7 @@ export function EventHubScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           {/* ================= 4. ATTENDANCE MODE SEGMENTS ================= */}
           <View style={styles.segmentContainer}>
@@ -336,34 +332,33 @@ export function EventHubScreen() {
           {/* ================= 5. FEATURED HERO EVENT ================= */}
           {featuredEvent && (
             <View style={styles.featuredWrap}>
-              <CyberEventCard
-                id={featuredEvent.id}
-                title={featuredEvent.title}
-                dateStr={new Date(featuredEvent.startsAt).toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-                badge="LIVE IN 2 DAYS"
-                tags={[
-                  featuredEvent.category || featuredEvent.type.toUpperCase(),
-                  featuredEvent.paid
-                    ? `${featuredEvent.currency || 'PKR'} ${featuredEvent.price}`
-                    : 'FREE',
-                ]}
-                membersCount={`${featuredEvent.attendeeCount || 0} MEMBERS`}
-                imageUri={featuredEvent.cover}
-                onPress={() => nav.navigate('EventDetail', { id: featuredEvent.id })}
+              <AutoCarousel
+                items={sortedUpcoming.slice(0, 4)}
+                keyExtractor={(e) => e.id}
+                showDots
+                renderItem={(e) => (
+                  <CyberEventCard
+                    id={e.id}
+                    title={e.title}
+                    dateStr={new Date(e.startsAt).toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                    badge={formatEventBadge(e.startsAt, e.endsAt)}
+                    showAvatars={(e.attendeeCount || 0) > 0}
+                    tags={[
+                      e.category || e.type.toUpperCase(),
+                      e.paid ? `${e.currency || 'PKR'} ${e.price}` : 'FREE',
+                    ]}
+                    membersCount={`${e.attendeeCount || 0} MEMBERS`}
+                    imageUri={e.cover}
+                    onPress={() => nav.navigate('EventDetail', { id: e.id })}
+                  />
+                )}
               />
-
-              {/* Carousel pagination indicator */}
-              <View style={styles.carouselPaginationRow}>
-                <View style={[styles.pagPill, styles.pagPillActive]} />
-                <View style={styles.pagPill} />
-                <View style={styles.pagPill} />
-              </View>
             </View>
           )}
 
@@ -388,7 +383,7 @@ export function EventHubScreen() {
                 key={ev.id}
                 id={ev.id}
                 title={ev.title}
-                category={ev.category || 'WATCH PARTY'}
+                category={ev.category || 'MEETUP'}
                 type={ev.type || 'Online'}
                 dateStr={formatDate(ev.startsAt)}
                 attendeesCount={ev.attendeeCount || 0}
@@ -428,7 +423,7 @@ export function EventHubScreen() {
             </CyberCutBox>
           )}
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <CyberFilterModal
         visible={showFilterModal}
@@ -499,7 +494,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 16,
     width: '100%',
   },
   searchFieldWrap: {
@@ -542,7 +537,7 @@ const styles = StyleSheet.create({
   chipsScroll: {
     gap: 8,
     paddingBottom: 4,
-    marginBottom: 14,
+    marginBottom: 20,
   },
   chipPressable: {
     height: 32,
@@ -635,8 +630,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: 24,
+    marginBottom: 14,
     width: '100%',
   },
   sectionTitleBlock: {
