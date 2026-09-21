@@ -927,7 +927,7 @@ export function HomeScreen() {
                 availableSlot={exp.nextSlot || 'AVAILABLE'}
                 avatarUri={exp.avatar}
                 verified={exp.verified}
-                avatarSource={exp.avatarId ? getCyberAvatarSource(exp.avatarId) : undefined}
+                avatarSource={getCyberAvatarSource(exp.avatarId)}
                 onBook={() => nav.navigate('ExpertProfile', { id: exp.id })}
                 onPress={() => nav.navigate('ExpertProfile', { id: exp.id })}
               />

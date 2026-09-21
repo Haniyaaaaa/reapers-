@@ -11,8 +11,9 @@ import { EXPERT_GOLD, ExpertTick } from '../experts/ExpertBadge';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
 import { CutAvatar } from '../avatars/CutAvatar';
+import { getCyberAvatarSource } from '../../data/cyberAvatars';
 
-const DEFAULT_EXPERT_AVATAR = require('../../../assets/avatars/extracted/female_6.jpg');
+const DEFAULT_EXPERT_AVATAR = getCyberAvatarSource(undefined); // the app-wide default avatar, so a user without one looks the same everywhere
 
 interface CyberExpertBookCardProps {
   id: string;

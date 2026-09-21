@@ -6,11 +6,13 @@ import {
   Text,
   View,
 } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
 import { CutAvatar } from '../avatars/CutAvatar';
+import { getCyberAvatarSource } from '../../data/cyberAvatars';
 
-const DEFAULT_TEAM_AVATAR = require('../../../assets/avatars/extracted/female_6.jpg');
+const DEFAULT_TEAM_AVATAR = getCyberAvatarSource(undefined); // the app-wide default avatar, so a user without one looks the same everywhere
 
 interface CyberTeamOppCardProps {
   id: string;
@@ -67,9 +69,10 @@ export function CyberTeamOppCard({
     );
   };
 
-  const formattedMatch = matchScore.includes('match')
-    ? matchScore
-    : `${matchScore.replace(/%/g, '')}% match`;
+  const matchPct = parseInt(matchScore.replace(/[^0-9]/g, ''), 10) || 0;
+  const matchTone = matchPct >= 80 ? '#3DDC84' : matchPct >= 60 ? colors.cyan : isLight ? '#6D35FF' : '#C084FC';
+  // "~44 hrs/week · Rev share" → one chip per part, so nothing has to share a line with the button.
+  const metaParts = (hoursRev ?? '').split('·').map((part) => part.trim()).filter(Boolean);
 
   return (
     <Pressable onPress={onPress} style={styles.cardContainer} accessibilityRole="button">
@@ -101,7 +104,10 @@ export function CyberTeamOppCard({
               </Text>
             </View>
 
-            <Text style={[styles.matchText, { color: colors.text }]}>{formattedMatch}</Text>
+            <View style={[styles.matchPill, { borderColor: `${matchTone}66`, backgroundColor: `${matchTone}1A` }]}>
+              <Text style={[styles.matchText, { color: matchTone }]}>{matchPct}%</Text>
+              <Text style={[styles.matchCaption, { color: matchTone }]}>MATCH</Text>
+            </View>
           </Pressable>
 
           {/* Skill Tag Capsule Pills */}
@@ -130,37 +136,41 @@ export function CyberTeamOppCard({
           {/* Description line */}
           {renderDescription()}
 
-          {/* Footer Row: Commitment Info & Chamfer Action Buttons */}
-          <View style={styles.footerRow}>
-            {hoursRev ? <Text style={[styles.hoursText, { color: colors.muted }]}>{hoursRev.toUpperCase()}</Text> : null}
-
-            <View style={[styles.actionButtonsRow, { marginLeft: 'auto' }]}>
-              <Pressable
-                onPress={onRequestToJoin}
-                style={styles.requestBtn}
-                accessibilityRole="button"
-              >
-                <CyberCutBox
-                  cutSize={6}
-                  radius={4}
-                  gradient={!requested}
-                  fill={requested ? (isLight ? 'rgba(16, 185, 129, 0.12)' : 'rgba(0, 230, 153, 0.15)') : undefined}
-                  borderColor={requested ? (isLight ? 'rgba(16, 185, 129, 0.40)' : 'rgba(0, 230, 153, 0.40)') : undefined}
-                  borderWidth={requested ? 1 : 0}
-                  style={styles.requestCutBox}
-                >
-                  <Text
-                    style={[
-                      styles.requestText,
-                      requested && (isLight ? { color: '#059669' } : { color: '#00E699' }),
-                    ]}
-                  >
-                    {requested ? '✓ REQUESTED' : 'REQUEST TO JOIN'}
+          {/* Footer: commitment chips on their own line, then a full-width call to action */}
+          <View style={[styles.footerDivider, { backgroundColor: colors.cardBorder }]} />
+          {metaParts.length > 0 ? (
+            <View style={styles.metaRow}>
+              {metaParts.map((part, i) => (
+                <View key={part} style={styles.metaChip}>
+                  <Ionicons name={i === 0 ? 'time-outline' : 'cash-outline'} size={13} color={colors.cyan} />
+                  <Text style={[styles.hoursText, { color: colors.muted }]} numberOfLines={1}>
+                    {part.toUpperCase()}
                   </Text>
-                </CyberCutBox>
-              </Pressable>
+                </View>
+              ))}
             </View>
-          </View>
+          ) : null}
+
+          <Pressable onPress={onRequestToJoin} disabled={requested} style={styles.requestBtn} accessibilityRole="button">
+            <CyberCutBox
+              cutSize={8}
+              radius={4}
+              gradient={!requested}
+              fill={requested ? (isLight ? 'rgba(16, 185, 129, 0.12)' : 'rgba(0, 230, 153, 0.15)') : undefined}
+              borderColor={requested ? (isLight ? 'rgba(16, 185, 129, 0.40)' : 'rgba(0, 230, 153, 0.40)') : undefined}
+              borderWidth={requested ? 1 : 0}
+              style={styles.requestCutBox}
+            >
+              <Text
+                style={[
+                  styles.requestText,
+                  requested && (isLight ? { color: '#059669' } : { color: '#00E699' }),
+                ]}
+              >
+                {requested ? '✓ REQUESTED' : 'REQUEST TO JOIN'}
+              </Text>
+            </CyberCutBox>
+          </Pressable>
         </View>
       </CyberCutBox>
     </Pressable>
@@ -206,11 +216,23 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: 0.2,
   },
+  matchPill: {
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   matchText: {
     fontFamily: fonts.display,
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#FFFFFF',
+  },
+  matchCaption: {
+    fontFamily: fonts.mono,
+    fontSize: 8,
+    letterSpacing: 1.2,
+    marginTop: -1,
   },
   tagsRow: {
     flexDirection: 'row',
@@ -234,7 +256,7 @@ const styles = StyleSheet.create({
   descText: {
     fontFamily: fonts.body,
     fontSize: 13,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   descNeeds: {
     color: '#9CA3AF',
@@ -249,10 +271,20 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontFamily: fonts.body,
   },
-  footerRow: {
+  footerDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginBottom: 12,
+  },
+  metaRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 14,
+    marginBottom: 12,
+  },
+  metaChip: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   hoursText: {
     fontFamily: fonts.mono,
@@ -260,25 +292,20 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     letterSpacing: 0.6,
   },
-  actionButtonsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   requestBtn: {
-    height: 34,
+    alignSelf: 'stretch',
   },
   requestCutBox: {
-    paddingHorizontal: 16,
-    height: 34,
+    height: 42,
+    alignSelf: 'stretch',
     justifyContent: 'center',
     alignItems: 'center',
   },
   requestText: {
     fontFamily: fonts.display,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 0.6,
+    letterSpacing: 1,
   },
 });

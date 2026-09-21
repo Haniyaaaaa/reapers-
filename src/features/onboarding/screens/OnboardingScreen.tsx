@@ -729,10 +729,11 @@ export function OnboardingScreen() {
 
                       {/* Custom tag */}
                       <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>ADD YOUR OWN</Text>
-                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 12 }}>
                         <View style={{ flex: 1 }}>
                           <CyberTextField
                             label=""
+                            containerStyle={{ marginBottom: 0 }}
                             value={customTag}
                             onChangeText={setCustomTag}
                             onSubmitEditing={addCustomTag}
@@ -741,7 +742,7 @@ export function OnboardingScreen() {
                             maxLength={24}
                           />
                         </View>
-                        <Pressable onPress={addCustomTag} accessibilityRole="button" style={{ height: 52, width: 76, marginTop: 4 }}>
+                        <Pressable onPress={addCustomTag} accessibilityRole="button" style={{ height: 48, width: 76 }}>
                           <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
                             <Text style={{ fontFamily: fonts.monoBold, fontSize: 12, letterSpacing: 0.8, color: '#FFFFFF' }}>ADD</Text>
                           </CyberCutBox>

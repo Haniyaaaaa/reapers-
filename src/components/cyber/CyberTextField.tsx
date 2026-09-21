@@ -43,6 +43,7 @@ export function CyberTextField({
   return (
     <View style={[styles.wrapper, containerStyle]}>
       {/* Label with optional purple/magenta asterisk */}
+      {label || required ? (
       <View style={styles.labelRow}>
         <Text
           style={[
@@ -55,6 +56,7 @@ export function CyberTextField({
         </Text>
         {required && <Text style={styles.asterisk}>*</Text>}
       </View>
+      ) : null}
 
       {/* Cyber Chamfer Input Box */}
       <CyberCutBox

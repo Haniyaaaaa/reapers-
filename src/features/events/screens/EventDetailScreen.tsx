@@ -688,7 +688,7 @@ export function EventDetailScreen() {
               <View style={styles.avatarStack}>
                 {attendees.slice(0, 5).map((att, i) => (
                   <View key={att.userId} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: 10 - i }}>
-                    <CutAvatar source={resolveAvatarSource(att.avatarUri, att.avatarId || 'male_1')} size={26} cut={7} borderWidth={1.5} borderColor={colors.background} />
+                    <CutAvatar source={resolveAvatarSource(att.avatarUri, att.avatarId)} size={26} cut={7} borderWidth={1.5} borderColor={colors.background} />
                   </View>
                 ))}
                 {attendees.length > 5 ? (
@@ -790,7 +790,7 @@ export function EventDetailScreen() {
                   style={[styles.attRow, { borderBottomColor: colors.cardBorder }]}
                   accessibilityRole="button"
                 >
-                  <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId || 'male_1')} size={40} cut={10} borderWidth={1} />
+                  <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId)} size={40} cut={10} borderWidth={1} />
                   <Text style={[styles.attName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
                   {item.ticketCount > 1 ? (
                     <View style={[styles.attTicketPill, { backgroundColor: colors.cardBorder }]}>

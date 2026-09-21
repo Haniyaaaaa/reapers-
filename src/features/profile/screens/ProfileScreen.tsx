@@ -25,7 +25,7 @@ import { DemoCard } from '../../../components/cards/DemoCard';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { skillOptions } from '../../../data/mock';
-import { resolveAvatarSource } from '../../../data/cyberAvatars';
+import { DEFAULT_AVATAR_ID, resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useAuthStore } from '../../../store/authStore';
 import { useNetworkStore } from '../../../store/networkStore';
@@ -108,7 +108,7 @@ export function ProfileScreen() {
   const [roles, setRoles] = useState<Role[]>(profile?.roles ?? []);
   const [skills, setSkills] = useState(profile?.skills ?? profile?.tags ?? []);
   const [avatar, setAvatar] = useState(profile?.avatarUri);
-  const [avatarId, setAvatarId] = useState(profile?.avatarId ?? 'male_1');
+  const [avatarId, setAvatarId] = useState(profile?.avatarId ?? DEFAULT_AVATAR_ID);
   const [avatarLook, setAvatarLook] = useState(profile?.avatarLook);
   const [portfolioUrl, setPortfolioUrl] = useState(profile?.portfolioUrl ?? '');
   const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedinUrl ?? '');
@@ -350,7 +350,7 @@ export function ProfileScreen() {
             <View pointerEvents="none" style={[styles.halo, styles.haloOuter, { backgroundColor: isExpert ? 'rgba(245, 197, 66, 0.07)' : 'rgba(109, 53, 255, 0.10)' }]} />
             <View pointerEvents="none" style={[styles.halo, styles.haloInner, { backgroundColor: isExpert ? 'rgba(245, 197, 66, 0.12)' : 'rgba(216, 60, 255, 0.14)' }]} />
             <CutAvatar
-              source={resolveAvatarSource(profile?.avatarUri, profile?.avatarId || 'male_1')}
+              source={resolveAvatarSource(profile?.avatarUri, profile?.avatarId)}
               size={90}
               cut={22}
               fill="#161B2E"
@@ -547,7 +547,7 @@ export function ProfileScreen() {
               error={nameErr}
               maxLength={30}
               showCount
-              placeholder="Hira Fatima"
+              placeholder="Daniel Carter"
             />
             <AuthTextField
               label="Username"
@@ -561,7 +561,7 @@ export function ProfileScreen() {
               maxLength={20}
               showCount
               autoCapitalize="none"
-              placeholder="hirafatima"
+              placeholder="danielcarter"
             />
             <Text style={[styles.editSectionTitle, { color: colors.muted }]}>Gamer Avatar</Text>
             <AvatarPicker
