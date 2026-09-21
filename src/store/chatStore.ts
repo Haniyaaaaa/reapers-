@@ -1,9 +1,11 @@
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { create } from 'zustand';
 import * as chatApi from '../services/supabase/chat';
-import { uploadChatImage, uploadChatVideo } from '../services/supabase/storage';
+import { uploadChatImage, uploadChatVideo, uploadChatVoice } from '../services/supabase/storage';
 import { captureException, track } from '../services/analytics/analytics';
 import { nextStreak } from '../utils/streak';
+import { reconcile, swr, type FetchOpts } from './swr';
+import type { ReactionChange } from '../services/supabase/realtime';
 import type { ChatMessage, Chatroom, RoomInvite, RoomJoinRequest, RoomMember } from '../types/chat';
 
 type RoomLink = { id: string; url: string; senderName: string; createdAt: string };
@@ -12,6 +14,20 @@ const MEDIA_PAGE_SIZE = 30;
 
 function emptyRoomMedia(existing?: RoomMediaState): RoomMediaState {
   return existing ?? { images: [], imagesHasMore: false, videos: [], videosHasMore: false, links: [], linksHasMore: false };
+}
+
+/** Applies a new-message patch to one room and re-sorts the whole list by recency — the
+ * WhatsApp behavior of a chat jumping to the top the instant a message comes in, rather than
+ * waiting for the next fetchRooms() to notice. The DB trigger (0063) keeps server-side
+ * ordering in sync for the next page load; this is purely the same thing done optimistically
+ * on the client so it's instant. */
+function bumpRoomToTop(rooms: Chatroom[], roomId: string, patch: Partial<Chatroom>): Chatroom[] {
+  const next = rooms.map((r) => (r.id === roomId ? { ...r, ...patch } : r));
+  return [...next].sort((a, b) => {
+    const at = a.lastMessageAt ?? a.lastChatAt ?? '';
+    const bt = b.lastMessageAt ?? b.lastChatAt ?? '';
+    return bt.localeCompare(at);
+  });
 }
 
 type ChatState = {
@@ -26,7 +42,7 @@ type ChatState = {
   typingRoomId: string | null;
   peerLastRead: Record<string, string | null>;
 
-  fetchRooms: (userId: string) => Promise<void>;
+  fetchRooms: (userId: string, opts?: FetchOpts) => Promise<void>;
   fetchPeerLastRead: (roomId: string, peerId: string) => Promise<void>;
   loadMoreRooms: (userId: string) => Promise<void>;
   createRoom: (
@@ -65,8 +81,9 @@ type ChatState = {
     roomId: string,
     myUserId: string,
     senderName: string,
-    kind: 'image' | 'video',
+    kind: 'image' | 'video' | 'sticker' | 'voice',
     localUri: string,
+    voiceDurationSec?: number,
   ) => Promise<void>;
   retryMessage: (roomId: string, myUserId: string, messageId: string) => Promise<void>;
   retryAllFailed: (myUserId: string) => Promise<void>;
@@ -87,9 +104,17 @@ type ChatState = {
   fetchRoomLinks: (roomId: string) => Promise<void>;
   loadMoreRoomLinks: (roomId: string) => Promise<void>;
 
+  roomStarred: Record<string, ChatMessage[]>;
+  roomStarredLoading: Record<string, boolean>;
+  fetchRoomStarred: (roomId: string, userId: string) => Promise<void>;
+  roomPinned: Record<string, ChatMessage[]>;
+  roomPinnedLoading: Record<string, boolean>;
+  fetchRoomPinned: (roomId: string, userId: string) => Promise<void>;
+
   setTyping: (roomId: string | null) => void;
 
   handleRealtimeInsert: (roomId: string, myUserId: string, row: Parameters<typeof chatApi.hydrateRealtimeMessage>[0]) => Promise<void>;
+  handleRealtimeReaction: (roomId: string, myUserId: string, change: ReactionChange) => void;
   handleRealtimeUpdate: (
     roomId: string,
     row: { id: string; content: string; edited: boolean; deleted: boolean; pinned: boolean; media_url?: string | null; media_thumbnail_url?: string | null },
@@ -125,6 +150,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   starredIds: new Set(),
   hiddenIds: new Set(),
   roomMedia: {},
+  roomStarred: {},
+  roomStarredLoading: {},
+  roomPinned: {},
+  roomPinnedLoading: {},
   typingRoomId: null,
   peerLastRead: {},
   members: {},
@@ -132,15 +161,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   roomInvitesLoading: false,
   joinRequests: {},
 
-  fetchRooms: async (userId) => {
-    set({ roomsLoading: true, roomsError: null });
-    try {
-      const { rows, hasMore } = await chatApi.listVisibleChatrooms(userId, 0);
-      set({ rooms: rows, roomsHasMore: hasMore, roomsLoading: false });
-    } catch (err) {
-      set({ roomsLoading: false, roomsError: err instanceof Error ? err.message : 'Could not load chat' });
-    }
-  },
+  fetchRooms: (userId, opts) =>
+    swr(
+      `rooms:${userId}`,
+      async () => {
+        // `roomsLoading` = "loading with nothing to show" — a refresh over an existing list must not
+        // flip it, or the screen swaps the list for skeletons on every refetch.
+        set((s) => ({ roomsLoading: s.rooms.length === 0, roomsError: null }));
+        try {
+          const { rows, hasMore } = await chatApi.listVisibleChatrooms(userId, 0);
+          set((s) => ({ rooms: reconcile(s.rooms, rows), roomsHasMore: hasMore, roomsLoading: false }));
+          return true;
+        } catch (err) {
+          set({ roomsLoading: false, roomsError: err instanceof Error ? err.message : 'Could not load chat' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMoreRooms: async (userId) => {
     try {
@@ -286,15 +324,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   fetchMessages: async (roomId, myUserId) => {
-    set((s) => ({ messagesLoading: { ...s.messagesLoading, [roomId]: true } }));
+    // Only "loading" when there's nothing to show yet — reopening a chat paints the cached thread
+    // immediately and refreshes it quietly underneath.
+    set((s) => (s.messages[roomId]?.length ? s : { messagesLoading: { ...s.messagesLoading, [roomId]: true } }));
     try {
-      const messages = await chatApi.listMessages(roomId, myUserId);
+      const fetched = await chatApi.listMessages(roomId, myUserId);
       const starred = get().starredIds;
       const hidden = get().hiddenIds;
-      set((s) => ({
-        messages: { ...s.messages, [roomId]: messages.filter((m) => !hidden.has(m.id)).map((m) => ({ ...m, starred: starred.has(m.id) })) },
-        messagesLoading: { ...s.messagesLoading, [roomId]: false },
-      }));
+      const server = fetched.filter((m) => !hidden.has(m.id)).map((m) => ({ ...m, starred: starred.has(m.id) }));
+      set((s) => {
+        const prev = s.messages[roomId] ?? [];
+        // Merge instead of replace: keep sends the server hasn't seen yet (temp-…) and older pages
+        // the user already scrolled back through, so a refetch never makes messages vanish/jump.
+        const pending = prev.filter((m) => m.id.startsWith('temp-'));
+        const serverIds = new Set(server.map((m) => m.id));
+        const oldestServer = server.length ? server[server.length - 1].createdAt : null;
+        const older = oldestServer
+          ? prev.filter((m) => !m.id.startsWith('temp-') && !serverIds.has(m.id) && m.createdAt < oldestServer)
+          : [];
+        const merged = [...pending, ...server, ...older];
+        return {
+          messages: { ...s.messages, [roomId]: reconcile(prev, merged) },
+          messagesLoading: { ...s.messagesLoading, [roomId]: false },
+        };
+      });
     } catch {
       set((s) => ({ messagesLoading: { ...s.messagesLoading, [roomId]: false } }));
     }
@@ -350,15 +403,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         messages: {
           ...s.messages,
-          [roomId]: (s.messages[roomId] ?? []).map((m) =>
-            m.id === tempId ? { ...m, id: row.id, createdAt: row.created_at, status: 'sent' } : m,
-          ),
+          [roomId]: (s.messages[roomId] ?? [])
+            .map((m) => (m.id === tempId ? { ...m, id: row.id, createdAt: row.created_at, status: 'sent' as const } : m))
+            // A refetch may already have delivered the real row — never keep two with one id.
+            .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i),
         },
-        rooms: s.rooms.map((r) => {
-          if (r.id !== roomId) return r;
-          const streak = r.kind === 'dm' ? nextStreak(r.lastChatAt, r.streakCount) : r.streakCount;
-          return { ...r, lastMessage: kind === 'gif' ? 'GIF' : kind === 'voice' ? 'Voice note' : content, lastChatAt: r.kind === 'dm' ? row.created_at : r.lastChatAt, streakCount: streak };
-        }),
+        rooms: (() => {
+          const r = s.rooms.find((x) => x.id === roomId);
+          const streak = r?.kind === 'dm' ? nextStreak(r.lastChatAt, r.streakCount) : r?.streakCount;
+          return bumpRoomToTop(s.rooms, roomId, {
+            lastMessage: kind === 'gif' ? 'GIF' : kind === 'voice' ? 'Voice note' : content,
+            lastMessageAt: row.created_at,
+            lastChatAt: r?.kind === 'dm' ? row.created_at : r?.lastChatAt,
+            streakCount: streak,
+          });
+        })(),
       }));
       if (get().rooms.find((r) => r.id === roomId)?.kind === 'dm') {
         await chatApi.updateMembership(myUserId, roomId, { lastChatAt: row.created_at, streakCount: get().rooms.find((r) => r.id === roomId)?.streakCount });
@@ -371,24 +430,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  sendMediaMessage: async (roomId, myUserId, senderName, kind, localUri) => {
+  sendMediaMessage: async (roomId, myUserId, senderName, kind, localUri, voiceDurationSec) => {
     const tempId = `temp-${Date.now()}`;
     const optimistic: ChatMessage = {
       id: tempId,
       roomId,
       senderId: myUserId,
       senderName,
-      content: kind === 'image' ? 'Photo' : 'Video',
+      content: kind === 'image' ? 'Photo' : kind === 'sticker' ? 'Sticker' : kind === 'voice' ? 'Voice message' : 'Video',
       createdAt: new Date().toISOString(),
       status: 'sending',
       mine: true,
       kind,
       mediaUrl: localUri,
+      voiceDurationSec,
     };
     set((s) => ({ messages: { ...s.messages, [roomId]: [optimistic, ...(s.messages[roomId] ?? [])] } }));
 
     try {
-      const mediaUrl = kind === 'image' ? await uploadChatImage(myUserId, localUri) : await uploadChatVideo(myUserId, localUri);
+      const mediaUrl = kind === 'video' ? await uploadChatVideo(myUserId, localUri) : kind === 'voice' ? await uploadChatVoice(myUserId, localUri) : await uploadChatImage(myUserId, localUri);
       let mediaThumbnailUrl: string | undefined;
       if (kind === 'video') {
         try {
@@ -406,6 +466,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         kind,
         mediaUrl,
         mediaThumbnailUrl,
+        voiceDurationSec,
       });
       set((s) => ({
         messages: {
@@ -414,9 +475,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             m.id === tempId ? { ...m, id: row.id, createdAt: row.created_at, status: 'sent', mediaUrl, mediaThumbnailUrl } : m,
           ),
         },
-        rooms: s.rooms.map((r) =>
-          r.id === roomId ? { ...r, lastMessage: kind === 'image' ? 'Photo' : 'Video' } : r,
-        ),
+        rooms: bumpRoomToTop(s.rooms, roomId, {
+          lastMessage: kind === 'image' ? 'Photo' : kind === 'sticker' ? 'Sticker' : kind === 'voice' ? 'Voice message' : 'Video',
+          lastMessageAt: row.created_at,
+        }),
       }));
       track('message_sent', { kind });
     } catch {
@@ -432,10 +494,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({
       messages: { ...s.messages, [roomId]: (s.messages[roomId] ?? []).filter((m) => m.id !== messageId) },
     }));
-    if ((msg.kind === 'image' || msg.kind === 'video') && msg.mediaUrl) {
+    if ((msg.kind === 'image' || msg.kind === 'video' || msg.kind === 'sticker' || msg.kind === 'voice') && msg.mediaUrl) {
       // A failed media message's mediaUrl is still the original local file:// URI — the
       // upload never completed, so re-run it from scratch rather than resending an empty row.
-      await get().sendMediaMessage(roomId, myUserId, msg.senderName, msg.kind, msg.mediaUrl);
+      await get().sendMediaMessage(roomId, myUserId, msg.senderName, msg.kind, msg.mediaUrl, msg.voiceDurationSec);
       return;
     }
     await get().sendMessage(roomId, myUserId, msg.senderName, msg.content, {
@@ -635,6 +697,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
 
+  fetchRoomStarred: async (roomId, userId) => {
+    set((s) => ({ roomStarredLoading: { ...s.roomStarredLoading, [roomId]: true } }));
+    try {
+      const rows = await chatApi.listStarredMessagesForRoom(roomId, userId, userId);
+      set((s) => ({ roomStarred: { ...s.roomStarred, [roomId]: rows }, roomStarredLoading: { ...s.roomStarredLoading, [roomId]: false } }));
+    } catch (err) {
+      captureException(err);
+      set((s) => ({ roomStarredLoading: { ...s.roomStarredLoading, [roomId]: false } }));
+    }
+  },
+
+  fetchRoomPinned: async (roomId, userId) => {
+    set((s) => ({ roomPinnedLoading: { ...s.roomPinnedLoading, [roomId]: true } }));
+    try {
+      const rows = await chatApi.listPinnedMessagesForRoom(roomId, userId);
+      set((s) => ({ roomPinned: { ...s.roomPinned, [roomId]: rows }, roomPinnedLoading: { ...s.roomPinnedLoading, [roomId]: false } }));
+    } catch (err) {
+      captureException(err);
+      set((s) => ({ roomPinnedLoading: { ...s.roomPinnedLoading, [roomId]: false } }));
+    }
+  },
+
   setTyping: (roomId) => set({ typingRoomId: roomId }),
 
   handleRealtimeInsert: async (roomId, myUserId, row) => {
@@ -642,7 +726,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (row.sender_id === myUserId) return; // our own sends are reconciled synchronously in sendMessage
     if (get().hiddenIds.has(row.id)) return;
     const message = await chatApi.hydrateRealtimeMessage(row, myUserId);
-    set((s) => ({ messages: { ...s.messages, [roomId]: [{ ...message, starred: s.starredIds.has(message.id) }, ...(s.messages[roomId] ?? [])] } }));
+    const preview = message.kind === 'gif' ? 'GIF' : message.kind === 'voice' ? 'Voice note' : message.kind === 'sticker' ? 'Sticker' : message.content;
+    set((s) => ({
+      messages: { ...s.messages, [roomId]: [{ ...message, starred: s.starredIds.has(message.id) }, ...(s.messages[roomId] ?? [])] },
+      rooms: bumpRoomToTop(s.rooms, roomId, { lastMessage: preview, lastMessageAt: row.created_at }),
+    }));
+  },
+
+  // Patches ONE message's reaction counts from a realtime event instead of refetching the whole
+  // thread. Our own reactions are already applied optimistically; events for messages that aren't
+  // in this thread (the subscription covers every room) are ignored.
+  handleRealtimeReaction: (roomId, myUserId, change) => {
+    if (change.userId === myUserId) return;
+    set((s) => {
+      const thread = s.messages[roomId];
+      const idx = thread ? thread.findIndex((m) => m.id === change.messageId) : -1;
+      if (!thread || idx === -1) return s;
+      const msg = thread[idx];
+      const reactions = [...(msg.reactions ?? [])];
+      const r = reactions.findIndex((x) => x.emoji === change.emoji);
+      if (change.type === 'INSERT') {
+        if (r === -1) reactions.push({ emoji: change.emoji, count: 1, mine: false });
+        else reactions[r] = { ...reactions[r], count: reactions[r].count + 1 };
+      } else if (r !== -1) {
+        if (reactions[r].count <= 1) reactions.splice(r, 1);
+        else reactions[r] = { ...reactions[r], count: reactions[r].count - 1 };
+      }
+      const next = [...thread];
+      next[idx] = { ...msg, reactions };
+      return { messages: { ...s.messages, [roomId]: next } };
+    });
   },
 
   handleRealtimeUpdate: (roomId, row) => {
@@ -735,6 +848,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   requestToJoinRoom: async (roomId, userId) => {
     try {
       await chatApi.requestToJoinRoom(roomId, userId);
+      // Marked locally rather than waiting on a refetch — the room's status must flip to
+      // "pending" the moment the request goes through, or a second tap re-opens the same
+      // "Request to join" prompt and lets someone send duplicate requests.
+      set((s) => ({ rooms: s.rooms.map((r) => (r.id === roomId ? { ...r, joinRequestPending: true } : r)) }));
     } catch (err) {
       captureException(err);
       throw err; // ChatDirectoryScreen shows a specific "couldn't send request" message

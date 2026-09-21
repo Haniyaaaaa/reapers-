@@ -1,12 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { emojiCategories, searchEmojis } from '../../data/emojiCatalog';
 import { fonts, radius, useTheme } from '../../theme';
+import { KeyboardAwareScrollView } from '../../components/layout/KeyboardAwareScrollView';
 
 export function EmojiPickerTray({
   onPick,
+  onClose,
 }: {
   onPick: (emoji: string) => void;
+  onClose: () => void;
 }) {
   const { colors } = useTheme();
   const [q, setQ] = useState('');
@@ -16,6 +20,12 @@ export function EmojiPickerTray({
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.headerRow}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Emoji</Text>
+        <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close emoji picker">
+          <Ionicons name="close" size={20} color={colors.muted} />
+        </Pressable>
+      </View>
       <TextInput
         value={q}
         onChangeText={setQ}
@@ -25,7 +35,7 @@ export function EmojiPickerTray({
         autoCorrect={false}
       />
       {!q.trim() ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cats}>
+        <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cats}>
           {emojiCategories.map((c) => {
             const on = c.id === cat;
             return (
@@ -34,21 +44,23 @@ export function EmojiPickerTray({
               </Pressable>
             );
           })}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       ) : null}
-      <ScrollView style={styles.gridScroll} contentContainerStyle={styles.grid}>
+      <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" style={styles.gridScroll} contentContainerStyle={styles.grid}>
         {results.map((item, i) => (
           <Pressable key={`${item.e}-${i}`} onPress={() => onPick(item.e)} style={styles.cell} accessibilityRole="button" accessibilityLabel={item.k}>
             <Text style={styles.glyph}>{item.e}</Text>
           </Pressable>
         ))}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { borderWidth: 1, borderRadius: radius.md, padding: 10, marginBottom: 8, maxHeight: 280 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  headerTitle: { fontFamily: fonts.bodySemi, fontSize: 13, fontWeight: '700' },
   search: { borderWidth: 1, borderRadius: radius.pill, minHeight: 40, paddingHorizontal: 12, fontFamily: fonts.body, marginBottom: 8 },
   cats: { gap: 8, paddingBottom: 8 },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },

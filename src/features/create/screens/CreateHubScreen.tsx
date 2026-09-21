@@ -13,11 +13,11 @@ export function CreateHubScreen() {
   const { colors } = useTheme();
   const items = [
     { label: 'Create room', route: 'CreateRoom' as const },
+    { label: 'Post team request', route: 'PostTeamRequest' as const },
     ...(isDeveloper
       ? [
           { label: 'Create event', route: 'CreateEvent' as const },
           { label: 'Upload demo', route: 'DemoUpload' as const },
-          { label: 'Post team request', route: 'PostTeamRequest' as const },
         ]
       : []),
   ];

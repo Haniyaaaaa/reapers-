@@ -184,3 +184,15 @@ export function getCyberAvatarById(id?: string): CyberAvatarItem {
 export function getCyberAvatarSource(id?: string): ImageSourcePropType {
   return getCyberAvatarById(id).source;
 }
+
+/** Custom uploaded photo wins; otherwise the preset avatar. */
+export function resolveAvatarSource(uri?: string | null, id?: string | null): ImageSourcePropType {
+  if (uri) return { uri };
+  return getCyberAvatarSource(id ?? undefined);
+}
+
+/** For a field that holds either a URL or a preset id (e.g. demos.developerAvatar). */
+export function resolveAvatarSourceLoose(uriOrId?: string | null): ImageSourcePropType {
+  if (uriOrId && /^(https?|file|data):/i.test(uriOrId)) return { uri: uriOrId };
+  return getCyberAvatarSource(uriOrId ?? undefined);
+}

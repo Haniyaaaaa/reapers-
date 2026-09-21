@@ -1,8 +1,9 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as expertsApi from '../services/supabase/experts';
 import { captureException, track } from '../services/analytics/analytics';
 import type { ExpertRow } from '../services/supabase/types';
-import type { Expert } from '../types/expert';
+import type { Expert, ExpertReview } from '../types/expert';
 import type { BookingSummary, ExpertSlot } from '../types/extra';
 import { parseSlot, type WeeklyAvailability } from '../utils/expertSlots';
 
@@ -20,6 +21,10 @@ type ExpertState = {
   availability: Record<string, WeeklyAvailability>;
   sessionCounts: Record<string, number>;
   reviewedBookingIds: Set<string>;
+  expertReviews: Record<string, ExpertReview[]>;
+  fetchExpertReviews: (expertId: string) => Promise<void>;
+  /** Session counts for experts that arrived outside the main list (search results). */
+  loadSessionCounts: (expertIds: string[]) => Promise<void>;
   recommendedExperts: Expert[];
   recommendedHasMore: boolean;
   recommendedIsFallback: boolean;
@@ -28,7 +33,7 @@ type ExpertState = {
   fetchMyBookings: (userId: string) => Promise<void>;
   expertsSpecialty: string | undefined;
   expertsExcludeUserId: string | undefined;
-  fetchExperts: (specialty?: string, excludeUserId?: string) => Promise<void>;
+  fetchExperts: (specialty?: string, excludeUserId?: string, opts?: FetchOpts) => Promise<void>;
   loadMoreExperts: () => Promise<void>;
   fetchExpert: (id: string) => Promise<void>;
   fetchBookedSlots: (expertId: string) => Promise<void>;
@@ -73,6 +78,7 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
   availability: {},
   sessionCounts: {},
   reviewedBookingIds: new Set(),
+  expertReviews: {},
   recommendedExperts: [],
   recommendedHasMore: false,
   recommendedIsFallback: false,
@@ -111,19 +117,28 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
     }
   },
 
-  fetchExperts: async (specialty, excludeUserId) => {
-    set({ loading: true, error: null, expertsSpecialty: specialty, expertsExcludeUserId: excludeUserId });
-    try {
-      const [{ rows, hasMore }, expertsTotalCount] = await Promise.all([
-        expertsApi.listVerifiedExperts(0, undefined, specialty, excludeUserId),
-        expertsApi.listExpertsCount(specialty, excludeUserId),
-      ]);
-      const sessionCounts = await expertsApi.listSessionCounts(rows.map((e) => e.id));
-      set((s) => ({ experts: rows, expertsHasMore: hasMore, expertsTotalCount, loading: false, sessionCounts: { ...s.sessionCounts, ...Object.fromEntries(sessionCounts) } }));
-    } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load experts' });
-    }
-  },
+  fetchExperts: (specialty, excludeUserId, opts) =>
+    swr(
+      `experts:${specialty ?? ''}:${excludeUserId ?? ''}`,
+      async () => {
+        // A different specialty is a different list — show the loading state for that; a plain
+        // refresh of the same list stays visible.
+        set((s) => ({ loading: s.experts.length === 0 || s.expertsSpecialty !== specialty, error: null, expertsSpecialty: specialty, expertsExcludeUserId: excludeUserId }));
+        try {
+          const [{ rows, hasMore }, expertsTotalCount] = await Promise.all([
+            expertsApi.listVerifiedExperts(0, undefined, specialty, excludeUserId),
+            expertsApi.listExpertsCount(specialty, excludeUserId),
+          ]);
+          const sessionCounts = await expertsApi.listSessionCounts(rows.map((e) => e.id));
+          set((s) => ({ experts: reconcile(s.experts, rows), expertsHasMore: hasMore, expertsTotalCount, loading: false, sessionCounts: { ...s.sessionCounts, ...Object.fromEntries(sessionCounts) } }));
+          return true;
+        } catch (err) {
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load experts' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMoreExperts: async () => {
     try {
@@ -177,6 +192,30 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
   submitExpertReview: async (bookingId, expertId, reviewerId, rating, comment) => {
     await expertsApi.submitExpertReview(bookingId, expertId, reviewerId, rating, comment);
     set((s) => ({ reviewedBookingIds: new Set(s.reviewedBookingIds).add(bookingId) }));
+    // The DB trigger just recomputed experts.rating / review_count — pull both so the new
+    // review and the updated average show up everywhere without a manual refresh.
+    get().fetchExpert(expertId);
+    get().fetchExpertReviews(expertId);
+  },
+
+  loadSessionCounts: async (expertIds) => {
+    const missing = expertIds.filter((id) => get().sessionCounts[id] === undefined);
+    if (missing.length === 0) return;
+    try {
+      const counts = await expertsApi.listSessionCounts(missing);
+      set((s) => ({ sessionCounts: { ...s.sessionCounts, ...Object.fromEntries(missing.map((id) => [id, counts.get(id) ?? 0])) } }));
+    } catch (err) {
+      captureException(err);
+    }
+  },
+
+  fetchExpertReviews: async (expertId) => {
+    try {
+      const reviews = await expertsApi.listExpertReviews(expertId);
+      set((s) => ({ expertReviews: { ...s.expertReviews, [expertId]: reviews } }));
+    } catch (err) {
+      captureException(err);
+    }
   },
 
   fetchExpert: async (id) => {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as notificationsApi from '../services/supabase/notifications';
 import { captureException } from '../services/analytics/analytics';
 import type { NotificationItem } from '../types/extra';
@@ -6,7 +7,7 @@ import type { NotificationItem } from '../types/extra';
 type NotificationState = {
   notes: NotificationItem[];
   loading: boolean;
-  fetchNotifications: (userId: string) => Promise<void>;
+  fetchNotifications: (userId: string, opts?: FetchOpts) => Promise<void>;
   markNoteRead: (id: string) => Promise<void>;
   markAllRead: (userId: string) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
@@ -17,16 +18,23 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   notes: [],
   loading: false,
 
-  fetchNotifications: async (userId) => {
-    set({ loading: true });
-    try {
-      const notes = await notificationsApi.listNotifications(userId);
-      set({ notes, loading: false });
-    } catch (err) {
-      captureException(err);
-      set({ loading: false });
-    }
-  },
+  fetchNotifications: (userId, opts) =>
+    swr(
+      `notifications:${userId}`,
+      async () => {
+        set((s) => ({ loading: s.notes.length === 0 }));
+        try {
+          const notes = await notificationsApi.listNotifications(userId);
+          set((s) => ({ notes: reconcile(s.notes, notes), loading: false }));
+          return true;
+        } catch (err) {
+          captureException(err);
+          set({ loading: false });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   markNoteRead: async (id) => {
     set((s) => ({ notes: s.notes.map((n) => (n.id === id ? { ...n, read: true } : n)) }));

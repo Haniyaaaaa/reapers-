@@ -50,6 +50,7 @@ function getNotificationIcon(title: string, body: string, targetScreen?: string)
   // raw message text — neither reliably contains a matchable keyword, so this one type is
   // routed by its target screen instead of the text-keyword heuristic every other type uses.
   if (targetScreen === 'ChatDetail') return { name: 'chatbubble-ellipses-outline' as const, color: '#00E5FF' };
+  if (targetScreen === 'TeamRequestApplicants') return { name: 'person-add-outline' as const, color: '#3DDC84' };
   const lower = `${title} ${body}`.toLowerCase();
   if (lower.includes('match') || lower.includes('teammate')) return { name: 'heart-outline' as const, color: '#3DDC84' };
   if (lower.includes('invite') || lower.includes('studio')) return { name: 'business-outline' as const, color: '#6D35FF' };
@@ -74,9 +75,10 @@ export function NotificationsScreen() {
   const deleteNote = useNotificationStore((s) => s.deleteNote);
   const handleRealtimeInsert = useNotificationStore((s) => s.handleRealtimeInsert);
 
+  const userId = user?.id;
   useEffect(() => {
-    if (user) fetchNotifications(user.id);
-  }, [user, fetchNotifications]);
+    if (userId) fetchNotifications(userId, { ifStaleMs: 10_000 });
+  }, [userId, fetchNotifications]);
 
   useEffect(() => {
     if (!user) return;

@@ -1,10 +1,10 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import type { Chatroom } from '../../types/chat';
 import { fonts, useTheme } from '../../theme';
-import { brandLogo } from '../../data/brand';
-import { avatarUriFor } from '../../data/gamerAvatars';
+import { roomAvatarSource } from '../../data/roomAvatar';
+import { CutAvatar } from '../avatars/CutAvatar';
 import { streakGlyph } from '../../data/streaks';
 import { useUiStore } from '../../store/uiStore';
 import { usePresenceStore } from '../../store/presenceStore';
@@ -35,7 +35,6 @@ function kindIcon(kind?: Chatroom['kind']) {
 export function ChatroomRow({ room, onPress }: { room: Chatroom; onPress: () => void }) {
   const { colors, isLight } = useTheme();
   const isReapers = room.kind === 'global' || room.id === 'g-general';
-  const uri = room.avatar || (!room.logo && !isReapers ? avatarUriFor(undefined, room.name) : undefined);
   const isUnread = room.unread > 0;
   const isPeerOnline = usePresenceStore((s) => (room.kind === 'dm' && room.peerId ? s.onlineUserIds.has(room.peerId) : false));
 
@@ -52,18 +51,14 @@ export function ChatroomRow({ room, onPress }: { room: Chatroom; onPress: () => 
         <View style={styles.cardInner}>
           {/* Avatar Container with Online Indicator */}
           <View style={styles.avatarWrap}>
-            <CyberCutBox
-              cutSize={8}
-              radius={4}
+            <CutAvatar
+              source={roomAvatarSource(room)}
+              size={46}
+              cut={12}
+              borderWidth={1}
+              borderColor={isLight ? colors.cardBorder : 'rgba(192, 132, 252, 0.4)'}
               fill={isLight ? colors.surfaceElevated : '#161B2E'}
-              style={styles.avatarCutBox}
-            >
-              <Image
-                source={isReapers ? brandLogo : room.logo ? room.logo : { uri }}
-                style={styles.avatarImg}
-                accessibilityIgnoresInvertColors
-              />
-            </CyberCutBox>
+            />
             {isPeerOnline && <View style={[styles.onlineDot, isLight && { borderColor: '#FFFFFF' }]} />}
           </View>
 
@@ -79,9 +74,13 @@ export function ChatroomRow({ room, onPress }: { room: Chatroom; onPress: () => 
               ) : null}
             </View>
 
-            <Text style={[styles.previewText, { color: colors.muted }]} numberOfLines={1}>
-              {room.kind === 'server' && room.serverRegion ? `${room.serverRegion} · ` : ''}
-              {room.lastMessage || 'Tap to view conversation'}
+            <Text
+              style={[styles.previewText, { color: room.joinRequestPending ? '#F5C542' : colors.muted }, room.joinRequestPending && styles.pendingText]}
+              numberOfLines={1}
+            >
+              {room.joinRequestPending
+                ? 'Request pending approval'
+                : `${room.kind === 'server' && room.serverRegion ? `${room.serverRegion} · ` : ''}${room.lastMessage || 'Tap to view conversation'}`}
             </Text>
           </View>
 
@@ -163,6 +162,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 13,
     color: '#8E9BB5',
+  },
+  pendingText: {
+    fontFamily: fonts.bodyMed,
   },
   rightCol: {
     alignItems: 'flex-end',

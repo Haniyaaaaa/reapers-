@@ -1,10 +1,22 @@
 import { File, UploadTask, UploadType } from 'expo-file-system';
 import { supabase, supabaseAnonKey, supabaseUrl } from './client';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import type { User } from '../../types/user';
 
 function extensionFromUri(uri: string): string {
   const match = /\.([a-zA-Z0-9]+)(?:\?.*)?$/.exec(uri);
   return (match?.[1] ?? 'jpg').toLowerCase();
+}
+
+const BUCKET_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
+
+/** Storage buckets only accept jpeg/png/webp/gif, but iOS pickers hand back HEIC/HEIF (and
+ * other formats) — re-encode anything else to JPEG before upload so it isn't rejected. */
+async function prepareImageForUpload(localUri: string): Promise<{ uri: string; ext: string }> {
+  const ext = extensionFromUri(localUri);
+  if (BUCKET_IMAGE_EXTS.has(ext)) return { uri: localUri, ext };
+  const result = await manipulateAsync(localUri, [], { compress: 0.9, format: SaveFormat.JPEG });
+  return { uri: result.uri, ext: 'jpg' };
 }
 
 /**
@@ -13,9 +25,10 @@ function extensionFromUri(uri: string): string {
  * helper is reused for event covers / community logos in later phases.
  */
 export async function uploadImage(bucket: string, ownerId: string, localUri: string): Promise<string> {
-  const ext = extensionFromUri(localUri);
+  const prepared = await prepareImageForUpload(localUri);
+  const ext = prepared.ext;
   const path = `${ownerId}/${Date.now()}.${ext}`;
-  const response = await fetch(localUri);
+  const response = await fetch(prepared.uri);
   const arrayBuffer = await response.arrayBuffer();
 
   const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
@@ -99,6 +112,23 @@ export async function uploadChatVideo(userId: string, localUri: string, onProgre
   return uploadVideoWithProgress('chat-media', `${userId}/${Date.now()}.${ext}`, localUri, onProgress);
 }
 
+/** Voice message upload — recordings are always small (a chat clip, not a demo video), so
+ * this reuses uploadImage's simple single-shot fetch()+arrayBuffer path instead of
+ * uploadVideoWithProgress's byte-progress machinery. `expo-audio`'s HIGH_QUALITY preset always
+ * outputs `.m4a`. */
+export async function uploadChatVoice(userId: string, localUri: string): Promise<string> {
+  const path = `${userId}/${Date.now()}.m4a`;
+  const response = await fetch(localUri);
+  const arrayBuffer = await response.arrayBuffer();
+  const { error } = await supabase.storage.from('chat-media').upload(path, arrayBuffer, {
+    contentType: 'audio/m4a',
+    upsert: false,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from('chat-media').getPublicUrl(path);
+  return data.publicUrl;
+}
+
 /** Photo-post upload — its own bucket (post-media), not chat-media: posts are public/global
  * with their own soft-delete/report lifecycle, distinct from chat-media's room-membership-
  * scoped visibility and per-message hide semantics. */
@@ -111,9 +141,10 @@ export async function uploadPostImage(userId: string, localUri: string): Promise
  * screenshots never risks touching the thumbnail shown in feed cards. Keyed by index since a
  * demo can have several. */
 export async function uploadDemoScreenshot(developerId: string, demoKey: string, localUri: string, index: number): Promise<string> {
-  const ext = extensionFromUri(localUri);
+  const prepared = await prepareImageForUpload(localUri);
+  const ext = prepared.ext;
   const path = `${developerId}/${demoKey}-${index}.${ext}`;
-  const response = await fetch(localUri);
+  const response = await fetch(prepared.uri);
   const arrayBuffer = await response.arrayBuffer();
   const { error } = await supabase.storage.from('demo-screenshots').upload(path, arrayBuffer, {
     contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
@@ -138,9 +169,10 @@ export async function deleteObjectByPublicUrl(bucket: string, publicUrl: string)
 
 export async function uploadDemoThumbnail(developerId: string, demoKey: string, localUri: string): Promise<string> {
   const path = `${developerId}/${demoKey}`;
-  const ext = extensionFromUri(localUri);
+  const prepared = await prepareImageForUpload(localUri);
+  const ext = prepared.ext;
   const fullPath = `${path}.${ext}`;
-  const response = await fetch(localUri);
+  const response = await fetch(prepared.uri);
   const arrayBuffer = await response.arrayBuffer();
   const { error } = await supabase.storage.from('demo-thumbnails').upload(fullPath, arrayBuffer, {
     contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
@@ -161,9 +193,10 @@ export async function uploadDemoThumbnail(developerId: string, demoKey: string, 
  * (joined to events.host_id) for the event's host.
  */
 export async function uploadPaymentProof(applicantId: string, eventId: string, localUri: string): Promise<string> {
-  const ext = extensionFromUri(localUri);
+  const prepared = await prepareImageForUpload(localUri);
+  const ext = prepared.ext;
   const path = `${applicantId}/${eventId}/${Date.now()}.${ext}`;
-  const response = await fetch(localUri);
+  const response = await fetch(prepared.uri);
   const arrayBuffer = await response.arrayBuffer();
   const { error } = await supabase.storage.from('event-payment-proofs').upload(path, arrayBuffer, {
     contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,

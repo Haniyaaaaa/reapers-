@@ -79,6 +79,7 @@ export function MessageActionSheet({
                 onPick={(e) => {
                   onReact(e);
                 }}
+                onClose={onClose}
               />
             </View>
           ) : (

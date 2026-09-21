@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { fonts, radius, useTheme } from '../../theme';
+import { CyberChip } from '../cyber/CyberChip';
+import { CyberCutBox } from '../cyber/CyberCutBox';
+import { fonts, useTheme } from '../../theme';
 
 type Props = {
   options: string[];
@@ -32,47 +34,54 @@ export function ChipPicker({ options, selected, onToggle, searchable, allowCusto
   return (
     <View>
       {searchable ? (
-        <TextInput
-          value={q}
-          onChangeText={setQ}
-          placeholder="Search tags"
-          placeholderTextColor={colors.muted2}
-          accessibilityLabel="Search tags"
-          style={[styles.search, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
-        />
+        <CyberCutBox
+          cutSize={10}
+          radius={6}
+          fill={colors.inputFill}
+          borderColor={colors.inputBorder}
+          borderWidth={0.88}
+          style={styles.inputBox}
+        >
+          <TextInput
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search tags"
+            placeholderTextColor={colors.muted2}
+            accessibilityLabel="Search tags"
+            style={[styles.input, { color: colors.text }]}
+          />
+        </CyberCutBox>
       ) : null}
       <View style={styles.wrap}>
-        {list.map((opt) => {
-          const on = selected.includes(opt);
-          return (
-            <Pressable
-              key={opt}
-              onPress={() => onToggle(opt)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-              style={[
-                styles.chip,
-                { borderColor: colors.border },
-                on && { backgroundColor: colors.magentaDeep, borderColor: colors.magenta },
-              ]}
-            >
-              <Text style={{ color: on ? colors.text : colors.muted, fontFamily: fonts.bodyMed, fontSize: 13 }}>{opt}</Text>
-            </Pressable>
-          );
-        })}
+        {list.map((opt) => (
+          <CyberChip key={opt} label={opt} selected={selected.includes(opt)} onPress={() => onToggle(opt)} />
+        ))}
       </View>
       {allowCustom ? (
         <View style={styles.customRow}>
-          <TextInput
-            value={custom}
-            onChangeText={setCustom}
-            placeholder="Add your own tag"
-            placeholderTextColor={colors.muted2}
-            onSubmitEditing={addCustom}
-            style={[styles.search, { flex: 1, marginBottom: 0, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
-          />
-          <Pressable onPress={addCustom} style={[styles.add, { backgroundColor: colors.magenta }]} accessibilityRole="button">
-            <Text style={{ color: colors.onPrimary, fontFamily: fonts.bodySemi }}>Add</Text>
+          <CyberCutBox
+            cutSize={10}
+            radius={6}
+            fill={colors.inputFill}
+            borderColor={colors.inputBorder}
+            borderWidth={0.88}
+            style={[styles.inputBox, styles.customInputBox]}
+          >
+            <TextInput
+              value={custom}
+              onChangeText={setCustom}
+              placeholder="Add your own tag"
+              placeholderTextColor={colors.muted2}
+              onSubmitEditing={addCustom}
+              style={[styles.input, { color: colors.text }]}
+            />
+          </CyberCutBox>
+          <Pressable onPress={addCustom} accessibilityRole="button" accessibilityLabel="Add tag" style={styles.addBtn}>
+            <CyberCutBox gradient cutSize={8} radius={4} style={styles.addCut}>
+              <View style={styles.addInner}>
+                <Text style={styles.addText}>ADD</Text>
+              </View>
+            </CyberCutBox>
           </Pressable>
         </View>
       ) : null}
@@ -81,22 +90,13 @@ export function ChipPicker({ options, selected, onToggle, searchable, allowCusto
 }
 
 const styles = StyleSheet.create({
-  search: {
-    minHeight: 44,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    fontFamily: fonts.body,
-    paddingHorizontal: 12,
-    marginBottom: 10,
-  },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    paddingHorizontal: 12,
-    minHeight: 36,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    justifyContent: 'center',
-  },
-  customRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'center' },
-  add: { minHeight: 44, paddingHorizontal: 16, borderRadius: radius.pill, justifyContent: 'center' },
+  inputBox: { height: 44, marginBottom: 10 },
+  customInputBox: { flex: 1, marginBottom: 0 },
+  input: { flex: 1, fontFamily: fonts.body, fontSize: 14, paddingHorizontal: 14 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap' },
+  customRow: { flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'center' },
+  addBtn: { width: 76, height: 44 },
+  addCut: { width: '100%', height: '100%' },
+  addInner: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  addText: { fontFamily: fonts.monoBold, fontSize: 12, letterSpacing: 0.8, color: '#FFFFFF' },
 });

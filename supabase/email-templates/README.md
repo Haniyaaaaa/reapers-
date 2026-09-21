@@ -26,10 +26,14 @@ fallback for anyone reading the email on the same device; `reset-password.html`
 
 ## Logo
 
-Both templates use a text wordmark ("REAPERS") rather than an `<img>` — the app's actual logo
-(`assets/logo.jpeg`) is a local bundled asset with no public URL to reference from an email.
-If you want the real logo, host it somewhere public (e.g. Supabase Storage's public bucket, or
-any CDN) and swap the wordmark `<span>` for an `<img src="https://.../logo.png" width="48" height="48" style="border-radius:12px;" alt="Reapers" />`.
+Both templates show the real logo as an `<img>` pointing at
+`https://azkfsilyttbbpsdiqgnn.supabase.co/storage/v1/object/public/brand/logo.png`. The
+optimized file is `logo.png` in this folder (192px, transparent) — upload it once:
+
+1. Supabase Dashboard → **Storage → New bucket**, name it `brand`, tick **Public bucket**.
+2. Upload `logo.png` to the bucket root.
+
+Until it's uploaded the image won't load and email clients show the "REAPERS" alt text instead.
 
 ## Variables reference (Supabase)
 

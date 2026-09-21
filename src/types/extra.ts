@@ -1,3 +1,5 @@
+import type { TeamCompensation, TeamStage, TeamWorkMode } from '../services/supabase/types';
+
 export type NotificationItem = {
   id: string;
   title: string;
@@ -51,14 +53,32 @@ export type DemoComment = {
 export type TeamRequest = {
   id: string;
   posterId: string;
+  posterAvatarUri?: string;
+  posterAvatarId?: string;
+  posterName?: string;
+  createdAt?: string;
   project: string;
   roles: string[];
   excerpt: string;
+  studio?: string;
+  teamSize?: number;
+  stage?: TeamStage;
+  engine?: string;
+  location?: string;
+  hoursPerWeek?: number;
+  compensation?: TeamCompensation;
+  /** YYYY-MM-DD — when the role is needed. */
+  neededBy?: string;
+  workMode?: TeamWorkMode;
+  /** Only set on the poster's own list (My team requests). */
+  applicantCount?: number;
 };
 
 export type PersonCard = {
   id: string;
   displayName: string;
+  avatarUri?: string;
+  avatarId?: string;
   roles: string[];
   skills: string[];
   connect: 'connect' | 'pending' | 'connected';
@@ -67,6 +87,8 @@ export type PersonCard = {
 export type TeamApplicant = {
   id: string;
   displayName: string;
+  avatarUri?: string;
+  avatarId?: string;
   roles: string[];
   skills: string[];
   appliedAt: string;

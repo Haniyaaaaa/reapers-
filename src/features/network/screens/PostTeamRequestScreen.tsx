@@ -1,9 +1,8 @@
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,8 +19,55 @@ import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { useAuth } from '../../../hooks/useAuth';
 import { useNetworkStore } from '../../../store/networkStore';
 import { fonts, useTheme } from '../../../theme';
+import type { TeamCompensation, TeamStage, TeamWorkMode } from '../../../services/supabase/types';
+import { COMPENSATION_OPTIONS, ENGINE_OPTIONS, ROLE_OPTIONS, STAGE_OPTIONS, WORK_MODE_OPTIONS, titleCase, toDateKey } from '../../../utils/teamRequest';
+import { getTeamRequest } from '../../../services/supabase/network';
+import { ListPickerSheet, type ListPickerOption } from '../../../components/inputs/ListPickerSheet';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
-const PRESET_ROLES = ['Unity', 'Unreal', 'UI', 'Netcode', 'Animation', 'SFX', 'Shaders', 'Live ops'];
+const PRESET_ROLES = ROLE_OPTIONS;
+
+/** Single-select pill row: tap a pill to pick it, tap it again to clear. */
+function ChipGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T | null;
+  onChange: (next: T | null) => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={[styles.fieldLabel, { color: colors.muted }]}>{label}</Text>
+      <View style={styles.pillsWrap}>
+        {options.map((o) => {
+          const active = value === o.value;
+          return (
+            <Pressable key={o.value} onPress={() => onChange(active ? null : o.value)} accessibilityRole="button" accessibilityState={{ selected: active }}>
+              {active ? (
+                <CyberCutBox cutSize={6} radius={4} gradient style={styles.activePillCut}>
+                  <View style={styles.activePillInner}>
+                    <Text style={styles.activePillText}>{o.label}</Text>
+                  </View>
+                </CyberCutBox>
+              ) : (
+                <CyberCutBox cutSize={6} radius={4} fill={colors.cardBorder} borderColor={colors.cardBorder} borderWidth={1} style={styles.inactivePillCut}>
+                  <View style={styles.inactivePillInner}>
+                    <Text style={[styles.inactivePillText, { color: colors.muted }]}>{o.label}</Text>
+                  </View>
+                </CyberCutBox>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
 
 export function PostTeamRequestScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -29,16 +75,55 @@ export function PostTeamRequestScreen() {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const postTeam = useNetworkStore((s) => s.postTeam);
+  const updateTeam = useNetworkStore((s) => s.updateTeam);
+  const { params } = useRoute<RouteProp<MainStackParamList, 'PostTeamRequest'>>();
+  const editId = params?.editId;
+  const isEditing = !!editId;
+  const existing = useNetworkStore((s) => (editId ? s.myTeams.find((t) => t.id === editId) ?? s.teams.find((t) => t.id === editId) : undefined));
 
   const [project, setProject] = useState('');
   const [excerpt, setExcerpt] = useState('');
   const [roles, setRoles] = useState<string[]>([]);
   const [customTag, setCustomTag] = useState('');
+  const [studio, setStudio] = useState('');
+  const [teamSize, setTeamSize] = useState('');
+  const [stage, setStage] = useState<TeamStage | null>(null);
+  const [engine, setEngine] = useState<string | null>(null);
+  const [location, setLocation] = useState('');
+  const [workMode, setWorkMode] = useState<TeamWorkMode | null>(null);
+  const [neededBy, setNeededBy] = useState<string | null>(null); // YYYY-MM-DD
+  const [neededByOpen, setNeededByOpen] = useState(false);
+  const [hours, setHours] = useState('');
+  const [compensation, setCompensation] = useState<TeamCompensation | null>(null);
   const [err, setErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitErr, setSubmitErr] = useState('');
 
   const valid = project.trim().length >= 3;
+
+  // Editing: load the existing request into the form once (from the lists already in memory, or
+  // fetched if the screen was opened cold).
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editId || loadedFor === editId) return;
+    const fill = (t: NonNullable<typeof existing>) => {
+      setProject(t.project);
+      setExcerpt(t.excerpt);
+      setRoles(t.roles);
+      setStudio(t.studio ?? '');
+      setTeamSize(t.teamSize ? String(t.teamSize) : '');
+      setStage(t.stage ?? null);
+      setEngine(t.engine ?? null);
+      setLocation(t.location ?? '');
+      setWorkMode(t.workMode ?? null);
+      setNeededBy(t.neededBy ?? null);
+      setHours(t.hoursPerWeek ? String(t.hoursPerWeek) : '');
+      setCompensation(t.compensation ?? null);
+      setLoadedFor(editId);
+    };
+    if (existing) fill(existing);
+    else getTeamRequest(editId).then((t) => t && fill(t)).catch(() => undefined);
+  }, [editId, existing, loadedFor]);
 
   const toggleRole = (r: string) => {
     if (roles.includes(r)) {
@@ -49,7 +134,7 @@ export function PostTeamRequestScreen() {
   };
 
   const addCustomRole = () => {
-    const tag = customTag.trim();
+    const tag = titleCase(customTag);
     if (!tag) return;
     if (!roles.includes(tag)) {
       setRoles([...roles, tag]);
@@ -62,14 +147,35 @@ export function PostTeamRequestScreen() {
       setErr('Project name is required');
       return;
     }
+    const size = teamSize ? Number(teamSize) : undefined;
+    const weekly = hours ? Number(hours) : undefined;
+    if (size !== undefined && (size < 1 || size > 500)) {
+      setSubmitErr('Team size must be between 1 and 500.');
+      return;
+    }
+    if (weekly !== undefined && (weekly < 1 || weekly > 168)) {
+      setSubmitErr('Hours per week must be between 1 and 168.');
+      return;
+    }
     setSubmitting(true);
     setSubmitErr('');
     try {
-      await postTeam(user.id, {
+      const payload = {
         project: project.trim(),
-        excerpt: excerpt.trim() || 'Looking for collaborators.',
-        roles: roles.length ? roles : ['Gameplay'],
-      });
+        excerpt: excerpt.trim(),
+        roles,
+        studio: studio.trim() || undefined,
+        teamSize: size,
+        stage: stage ?? undefined,
+        engine: engine ?? undefined,
+        location: location.trim() || undefined,
+        workMode: workMode ?? undefined,
+        neededBy: neededBy ?? undefined,
+        hoursPerWeek: weekly,
+        compensation: compensation ?? undefined,
+      };
+      if (editId) await updateTeam(editId, payload);
+      else await postTeam(user.id, payload);
       nav.goBack();
     } catch (e) {
       setSubmitErr(e instanceof Error ? e.message : 'Could not publish request');
@@ -78,9 +184,25 @@ export function PostTeamRequestScreen() {
     }
   };
 
+  const neededByOptions: ListPickerOption[] = Array.from({ length: 180 }, (_, i) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + i);
+    const key = toDateKey(d);
+    return { key, label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }), hint: key };
+  });
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CyberBackground showArtwork={false} />
+      <ListPickerSheet
+        visible={neededByOpen}
+        title="Role needed by"
+        options={neededByOptions}
+        selectedKey={neededBy ?? undefined}
+        onSelect={setNeededBy}
+        onClose={() => setNeededByOpen(false)}
+      />
 
       {/* Screen Header Bar */}
       <View style={[styles.headerBar, { paddingTop: insets.top + 8 }]}>
@@ -99,10 +221,11 @@ export function PostTeamRequestScreen() {
           </CyberCutBox>
         </Pressable>
 
-        <Text style={[styles.headerTitleText, { color: colors.text }]}>Post team request</Text>
+        <Text style={[styles.headerTitleText, { color: colors.text }]}>{isEditing ? 'Edit team request' : 'Post team request'}</Text>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
         showsVerticalScrollIndicator={false}
       >
@@ -179,9 +302,110 @@ export function PostTeamRequestScreen() {
                 </CyberCutBox>
 
                 <Text style={[styles.hintText, { color: colors.muted2 }]}>
-                  Mention the engine, the stage you are at, and the time commitment.
+                  What you are building and what you still need help with.
                 </Text>
               </View>
+            </View>
+          </CyberCutBox>
+        </View>
+
+        {/* Section 1b: TEAM DETAILS — every field optional; the card only shows what is filled in */}
+        <View style={styles.fieldSection}>
+          <Text style={[styles.sectionHeaderLabel, { color: colors.primary }]}>TEAM DETAILS</Text>
+
+          <CyberCutBox
+            cutSize={12}
+            radius={8}
+            fill={colors.cardFill}
+            borderColor={colors.cardBorder}
+            borderWidth={1}
+            style={styles.cardCutBox}
+          >
+            <View style={styles.cardInner}>
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={[styles.fieldLabel, { color: colors.muted }]}>STUDIO / TEAM NAME</Text>
+                  <Text style={[styles.counterText, { color: colors.muted2 }]}>{studio.length}/60</Text>
+                </View>
+                <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.inputCutBox}>
+                  <TextInput
+                    value={studio}
+                    onChangeText={(v) => setStudio(v.slice(0, 60))}
+                    placeholder="Karachi Pixel Studio"
+                    placeholderTextColor={colors.muted2}
+                    style={[styles.textInput, { color: colors.text }]}
+                  />
+                </CyberCutBox>
+              </View>
+
+              <View style={styles.twoCols}>
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={[styles.fieldLabel, { color: colors.muted }]}>TEAM SIZE</Text>
+                  <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.inputCutBox}>
+                    <TextInput
+                      value={teamSize}
+                      onChangeText={(v) => setTeamSize(v.replace(/\D/g, '').slice(0, 3))}
+                      placeholder="4"
+                      placeholderTextColor={colors.muted2}
+                      keyboardType="number-pad"
+                      style={[styles.textInput, { color: colors.text }]}
+                    />
+                  </CyberCutBox>
+                </View>
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={[styles.fieldLabel, { color: colors.muted }]}>HOURS / WEEK</Text>
+                  <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.inputCutBox}>
+                    <TextInput
+                      value={hours}
+                      onChangeText={(v) => setHours(v.replace(/\D/g, '').slice(0, 3))}
+                      placeholder="10"
+                      placeholderTextColor={colors.muted2}
+                      keyboardType="number-pad"
+                      style={[styles.textInput, { color: colors.text }]}
+                    />
+                  </CyberCutBox>
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <View style={styles.labelRow}>
+                  <Text style={[styles.fieldLabel, { color: colors.muted }]}>CITY</Text>
+                  <Text style={[styles.counterText, { color: colors.muted2 }]}>{location.length}/60</Text>
+                </View>
+                <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.inputCutBox}>
+                  <TextInput
+                    value={location}
+                    onChangeText={(v) => setLocation(v.slice(0, 60))}
+                    placeholder="e.g. Karachi"
+                    placeholderTextColor={colors.muted2}
+                    style={[styles.textInput, { color: colors.text }]}
+                  />
+                </CyberCutBox>
+              </View>
+
+              <ChipGroup label="WORK MODE" options={WORK_MODE_OPTIONS} value={workMode} onChange={setWorkMode} />
+
+              <View style={styles.inputGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.muted }]}>ROLE NEEDED BY</Text>
+                <Pressable onPress={() => setNeededByOpen(true)} accessibilityRole="button">
+                  <CyberCutBox cutSize={8} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.inputCutBox}>
+                    <View style={styles.neededByInner}>
+                      <Text style={[styles.textInput, { color: neededBy ? colors.text : colors.muted2, paddingVertical: 0 }]}>{neededBy ?? 'Pick a date (optional)'}</Text>
+                      {neededBy ? (
+                        <Pressable onPress={() => setNeededBy(null)} hitSlop={8} accessibilityLabel="Clear date">
+                          <Ionicons name="close-circle" size={18} color={colors.muted} />
+                        </Pressable>
+                      ) : (
+                        <Ionicons name="calendar-outline" size={18} color={colors.muted} />
+                      )}
+                    </View>
+                  </CyberCutBox>
+                </Pressable>
+              </View>
+
+              <ChipGroup label="STAGE" options={STAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} value={stage} onChange={setStage} />
+              <ChipGroup label="ENGINE" options={ENGINE_OPTIONS.map((e) => ({ value: e, label: e }))} value={engine} onChange={setEngine} />
+              <ChipGroup label="COMPENSATION" options={COMPENSATION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))} value={compensation} onChange={setCompensation} />
             </View>
           </CyberCutBox>
         </View>
@@ -275,7 +499,7 @@ export function PostTeamRequestScreen() {
 
               {roles.length === 0 ? (
                 <Text style={[styles.noteText, { color: colors.muted2 }]}>
-                  Nothing picked yet, so we will tag your post as Gameplay.
+                  Add the roles you still need so matching developers can find you.
                 </Text>
               ) : null}
             </View>
@@ -300,7 +524,7 @@ export function PostTeamRequestScreen() {
             >
               <View style={styles.publishInner}>
                 <Text style={styles.publishText}>
-                  {submitting ? 'Publishing…' : 'Publish request'}
+                  {submitting ? (isEditing ? 'Saving…' : 'Publishing…') : isEditing ? 'Save changes' : 'Publish request'}
                 </Text>
               </View>
             </CyberCutBox>
@@ -321,12 +545,13 @@ export function PostTeamRequestScreen() {
             </CyberCutBox>
           </Pressable>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  neededByInner: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 12 },
   container: {
     flex: 1,
     backgroundColor: '#090F1C',
@@ -390,6 +615,10 @@ const styles = StyleSheet.create({
   },
   inputGroup: {
     gap: 6,
+  },
+  twoCols: {
+    flexDirection: 'row',
+    gap: 12,
   },
   labelRow: {
     flexDirection: 'row',

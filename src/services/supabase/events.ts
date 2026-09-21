@@ -1,9 +1,10 @@
 import { supabase } from './client';
 import type { EventInsert, EventPaymentApplicationRow, EventPayoutAccountRow, EventRow, EventRsvpRow, EventUpdate } from './types';
-import type { EventPaymentApplication, GameEvent, PayoutAccount, RsvpStatus } from '../../types/event';
+import type { EventPaymentApplication, GameEvent, PayoutAccount, RsvpStatus, TicketPlan } from '../../types/event';
 import { PAGE_SIZE, toPage, type Page } from './pagination';
+import { likePattern } from './searchText';
 
-type EventRowWithHost = EventRow & { profiles: { display_name: string } | null };
+type EventRowWithHost = EventRow & { profiles: { display_name: string; avatar_uri?: string | null; avatar_id?: string | null } | null };
 
 function eventRowToEvent(row: EventRowWithHost, myRsvp: EventRsvpRow | null): GameEvent {
   return {
@@ -14,13 +15,17 @@ function eventRowToEvent(row: EventRowWithHost, myRsvp: EventRsvpRow | null): Ga
     type: row.type,
     category: (row.category as GameEvent['category']) ?? undefined,
     startsAt: row.starts_at,
+    endsAt: row.ends_at ?? undefined,
     location: row.location,
     lat: row.lat ?? undefined,
     lng: row.lng ?? undefined,
     cover: row.cover_url ?? 'https://images.unsplash.com/photo-1511882150382-421056c89033?w=1200',
     posterName: row.profiles?.display_name ?? 'Someone',
+    posterAvatarUri: row.profiles?.avatar_uri ?? undefined,
+    posterAvatarId: row.profiles?.avatar_id ?? undefined,
     attendeeCount: row.attendee_count,
     maxAttendees: row.max_attendees ?? undefined,
+    registrationClosesBeforeMin: row.registration_closes_before_minutes ?? 0,
     rsvp: (myRsvp?.status as RsvpStatus) ?? null,
     paid: row.paid,
     price: row.price ?? undefined,
@@ -34,7 +39,7 @@ function eventRowToEvent(row: EventRowWithHost, myRsvp: EventRsvpRow | null): Ga
 // event_rsvps' own two FKs) — PostgREST can't infer which without disambiguation, the same
 // PGRST201 class of bug fixed for `experts` earlier in this project (EXPERT_SELECT in
 // experts.ts uses the identical `!constraint_name` pattern).
-const EVENT_SELECT = '*, profiles!events_host_id_fkey(display_name)';
+const EVENT_SELECT = '*, profiles!events_host_id_fkey(display_name, avatar_uri, avatar_id)';
 
 export async function listEvents(userId: string, offset = 0, limit = PAGE_SIZE): Promise<Page<GameEvent>> {
   const [{ data: rows, error }, { data: myRsvps }] = await Promise.all([
@@ -49,6 +54,27 @@ export async function listEvents(userId: string, offset = 0, limit = PAGE_SIZE):
   const rsvpByEvent = new Map((myRsvps ?? []).map((r) => [r.event_id, r]));
   const page = toPage(rows as unknown as EventRowWithHost[] | null, limit);
   return { rows: page.rows.map((r) => eventRowToEvent(r, rsvpByEvent.get(r.id) ?? null)), hasMore: page.hasMore };
+}
+
+/** Server-side search over title, description, location and category — upcoming events only (the
+ * same 3h grace window the screens use), soonest first. */
+export async function searchEvents(userId: string, query: string, limit = 40): Promise<GameEvent[]> {
+  const p = likePattern(query);
+  if (!p) return [];
+  const cutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const [{ data: rows, error }, { data: myRsvps }] = await Promise.all([
+    supabase
+      .from('events')
+      .select(EVENT_SELECT)
+      .or(`title.ilike.${p},description.ilike.${p},location.ilike.${p},category.ilike.${p}`)
+      .gte('starts_at', cutoff)
+      .order('starts_at', { ascending: true })
+      .limit(limit),
+    supabase.from('event_rsvps').select('*').eq('user_id', userId),
+  ]);
+  if (error) throw error;
+  const rsvpByEvent = new Map((myRsvps ?? []).map((r) => [r.event_id, r]));
+  return ((rows ?? []) as unknown as EventRowWithHost[]).map((r) => eventRowToEvent(r, rsvpByEvent.get(r.id) ?? null));
 }
 
 /** Events you host or are RSVP'd 'going' to — powers "My Events" on the profile screen.
@@ -90,12 +116,31 @@ export async function updateEvent(id: string, patch: EventUpdate): Promise<Event
   return data;
 }
 
+/** The exact venue (or join link) — RLS on event_venues (0067) only returns the row to the host,
+ * admins, and people with a confirmed "going" RSVP, so a null result means "not revealed yet"
+ * (or none was set), not an error. */
+export async function getEventVenue(eventId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('event_venues').select('venue').eq('event_id', eventId).maybeSingle();
+  if (error) throw error;
+  return data?.venue ?? null;
+}
+
+export async function setEventVenue(eventId: string, venue: string | null): Promise<void> {
+  if (!venue) {
+    const { error } = await supabase.from('event_venues').delete().eq('event_id', eventId);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase.from('event_venues').upsert({ event_id: eventId, venue }, { onConflict: 'event_id' });
+  if (error) throw error;
+}
+
 export async function deleteEvent(id: string): Promise<void> {
   const { error } = await supabase.from('events').delete().eq('id', id);
   if (error) throw error;
 }
 
-export type EventAttendee = { userId: string; name: string; avatarUri?: string; avatarId?: string };
+export type EventAttendee = { userId: string; name: string; avatarUri?: string; avatarId?: string; ticketCount: number };
 
 /** RLS (event_rsvps_select_own_or_host) only actually returns rows to the host/admin or the
  * caller's own row — a non-host caller gets an empty list back, not an error. Callers should
@@ -103,13 +148,16 @@ export type EventAttendee = { userId: string; name: string; avatarUri?: string; 
 export async function listEventAttendees(eventId: string): Promise<EventAttendee[]> {
   const { data, error } = await supabase
     .from('event_rsvps')
-    .select('user_id, profiles(display_name, avatar_uri, avatar_id)')
+    .select('user_id, ticket_count, profiles(display_name, avatar_uri, avatar_id)')
     .eq('event_id', eventId)
-    .eq('status', 'going');
+    .eq('status', 'going')
+    .order('created_at', { ascending: true })
+    .limit(500);
   if (error) throw error;
-  return (data as unknown as { user_id: string; profiles: { display_name: string; avatar_uri: string | null; avatar_id: string | null } | null }[]).map(
+  return (data as unknown as { user_id: string; ticket_count: number | null; profiles: { display_name: string; avatar_uri: string | null; avatar_id: string | null } | null }[]).map(
     (row) => ({
       userId: row.user_id,
+      ticketCount: row.ticket_count ?? 1,
       name: row.profiles?.display_name ?? 'Someone',
       avatarUri: row.profiles?.avatar_uri ?? undefined,
       avatarId: row.profiles?.avatar_id ?? undefined,
@@ -198,17 +246,37 @@ function applicationRowToApplication(row: ApplicationRowWithApplicant): EventPay
     status: row.status,
     rejectionReason: row.rejection_reason ?? undefined,
     reservationCode: row.reservation_code ?? undefined,
+    planName: row.plan_name ?? undefined,
+    unitPrice: row.unit_price ?? undefined,
+    quantity: row.quantity ?? 1,
+    totalAmount: row.total_amount ?? undefined,
     createdAt: row.created_at,
   };
 }
 
 const APPLICATION_SELECT = '*, profiles(display_name, avatar_uri, avatar_id)';
 
+export async function listTicketPlans(eventId: string): Promise<TicketPlan[]> {
+  const { data, error } = await supabase.from('event_ticket_plans').select('*').eq('event_id', eventId).order('sort_order').order('created_at');
+  if (error) throw error;
+  return (data ?? []).map((r) => ({ id: r.id, name: r.name, price: Number(r.price) }));
+}
+
+export async function createTicketPlans(eventId: string, plans: { name: string; price: number }[]): Promise<void> {
+  if (plans.length === 0) return;
+  const { error } = await supabase
+    .from('event_ticket_plans')
+    .insert(plans.map((p, i) => ({ event_id: eventId, name: p.name, price: p.price, sort_order: i })));
+  if (error) throw error;
+}
+
 export async function submitPaymentApplication(input: {
   eventId: string;
   applicantId: string;
   payoutAccountId?: string;
   proofScreenshotPath: string;
+  ticketPlanId?: string;
+  quantity?: number;
 }): Promise<EventPaymentApplication> {
   const { data, error } = await supabase
     .from('event_payment_applications')
@@ -217,6 +285,8 @@ export async function submitPaymentApplication(input: {
       applicant_id: input.applicantId,
       payout_account_id: input.payoutAccountId,
       proof_screenshot_path: input.proofScreenshotPath,
+      ticket_plan_id: input.ticketPlanId,
+      quantity: input.quantity ?? 1,
     })
     .select(APPLICATION_SELECT)
     .single();
@@ -226,11 +296,17 @@ export async function submitPaymentApplication(input: {
 
 export async function resubmitPaymentApplication(
   id: string,
-  patch: { payoutAccountId?: string; proofScreenshotPath: string },
+  patch: { payoutAccountId?: string; proofScreenshotPath: string; ticketPlanId?: string; quantity?: number },
 ): Promise<EventPaymentApplication> {
   const { data, error } = await supabase
     .from('event_payment_applications')
-    .update({ payout_account_id: patch.payoutAccountId, proof_screenshot_path: patch.proofScreenshotPath, status: 'pending' })
+    .update({
+      payout_account_id: patch.payoutAccountId,
+      proof_screenshot_path: patch.proofScreenshotPath,
+      ticket_plan_id: patch.ticketPlanId,
+      quantity: patch.quantity,
+      status: 'pending',
+    })
     .eq('id', id)
     .select(APPLICATION_SELECT)
     .single();

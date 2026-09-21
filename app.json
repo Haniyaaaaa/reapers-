@@ -24,7 +24,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Reapers uses your camera to take a profile photo, demo cover, or event cover image.",
         "NSPhotoLibraryUsageDescription": "Reapers needs access to your photo library to pick a profile photo, demo video/thumbnail, room icon, community logo, or event cover.",
-        "NSMicrophoneUsageDescription": "Reapers needs microphone access to record audio for demo videos you upload."
+        "NSMicrophoneUsageDescription": "Reapers needs microphone access to record voice messages in chat and audio for demo videos you upload."
       }
     },
     "android": {

@@ -87,7 +87,9 @@ async function guarded<T>(set: (partial: Partial<AdminState>) => void, message: 
   try {
     const result = await fn();
     set({ error: null });
-    return result;
+    // Void API calls resolve to `undefined`, which callers read as "failed" (`ok === undefined`).
+    // Map a successful void result to `true` so `undefined` only ever means an error.
+    return result === undefined ? (true as T) : result;
   } catch (err) {
     captureException(err);
     set({ error: err instanceof Error ? err.message : message });

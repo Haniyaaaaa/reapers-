@@ -1,8 +1,8 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { EXPERT_GOLD_GRADIENT, ExpertTick } from '../../../components/experts/ExpertBadge';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import {
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -19,10 +19,11 @@ import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { ExpertCalendar } from '../../../components/experts/ExpertCalendar';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
+import { ProRequiredSheet } from '../../../components/feedback/ProRequiredSheet';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { Skeleton } from '../../../components/feedback/Skeleton';
 import { PrimaryButton } from '../../../components/buttons/PrimaryButton';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useExpertStore } from '../../../store/expertStore';
@@ -30,6 +31,8 @@ import { fonts, useTheme } from '../../../theme';
 import { googleCalUrl, type WeeklyAvailability } from '../../../utils/expertSlots';
 import { EMPTY_ARRAY } from '../../../utils/emptyArray';
 import type { ExpertSlot } from '../../../types/extra';
+import type { ExpertReview } from '../../../types/expert';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
 
 export function ExpertProfileScreen() {
   const route = useRoute<RouteProp<MainStackParamList, 'ExpertProfile'>>();
@@ -45,11 +48,14 @@ export function ExpertProfileScreen() {
   const availability = useExpertStore((s) => (route.params?.id ? s.availability[route.params.id] ?? (EMPTY_ARRAY as unknown as WeeklyAvailability) : (EMPTY_ARRAY as unknown as WeeklyAvailability)));
   const fetchAvailability = useExpertStore((s) => s.fetchAvailability);
   const bookSlot = useExpertStore((s) => s.bookSlot);
+  const reviews = useExpertStore((s) => (route.params?.id ? s.expertReviews[route.params.id] ?? (EMPTY_ARRAY as unknown as ExpertReview[]) : (EMPTY_ARRAY as unknown as ExpertReview[])));
+  const fetchExpertReviews = useExpertStore((s) => s.fetchExpertReviews);
 
   const [pick, setPick] = useState<{ day: string; time: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingExpert, setLoadingExpert] = useState(!expert);
   const [conflict, setConflict] = useState('');
+  const [showProSheet, setShowProSheet] = useState(false);
   const [confirmed, setConfirmed] = useState<{ day: string; time: string } | null>(null);
 
   useEffect(() => {
@@ -65,10 +71,11 @@ export function ExpertProfileScreen() {
     }
     fetchBookedSlots(expertId);
     fetchAvailability(expertId);
+    fetchExpertReviews(expertId);
     return () => {
       cancelled = true;
     };
-  }, [route.params?.id, expert, fetchExpert, fetchBookedSlots, fetchAvailability]);
+  }, [route.params?.id, expert, fetchExpert, fetchBookedSlots, fetchAvailability, fetchExpertReviews]);
 
   const refreshControl = useRefreshControl(() => {
     const expertId = route.params?.id;
@@ -104,7 +111,7 @@ export function ExpertProfileScreen() {
     const res = await bookSlot(expert.id, user.id, pick.day, pick.time);
     setBusy(false);
     if (res === 'requires_pro') {
-      setConflict('Booking an expert requires an active Pro subscription.');
+      setShowProSheet(true);
       setPick(null);
       return;
     }
@@ -151,28 +158,23 @@ export function ExpertProfileScreen() {
         {/* Expert Profile Hero Card */}
         <View style={styles.profileHeroRow}>
           <View style={styles.avatarGlowWrap}>
-            <LinearGradient
-              colors={['#00F0FF', '#7928CA', '#D83CFF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.avatarRingGradient}
-            >
-              <View style={[styles.avatarInnerBox, { backgroundColor: colors.surfaceElevated }]}>
-                <Image
-                  source={getCyberAvatarSource(expert.avatarId)}
-                  style={styles.avatarImg}
-                />
-              </View>
-            </LinearGradient>
+            <CutAvatar
+              source={resolveAvatarSource(expert.avatar, expert.avatarId)}
+              size={72}
+              cut={20}
+              borderWidth={3}
+              gradientBorder={expert.verified ? EXPERT_GOLD_GRADIENT : ['#00F0FF', '#7928CA', '#D83CFF']}
+              fill={colors.surfaceElevated}
+            />
           </View>
 
           <View style={styles.expertInfoWrap}>
             <View style={styles.nameRow}>
               <Text style={[styles.expertNameText, { color: colors.text }]}>{expert.name}</Text>
-              {expert.verified ? <Ionicons name="checkmark-circle" size={18} color={colors.primary} /> : null}
+              {expert.verified ? <ExpertTick size={18} /> : null}
             </View>
             <Text style={[styles.expertSubtext, { color: colors.muted }]}>
-              {expert.role || 'Senior Dev'} · {expert.company || 'Studio'} · {expert.rating.toFixed(1)}★
+              {expert.role || 'Senior Dev'} · {expert.company || 'Studio'} · {expert.reviewCount > 0 ? `${expert.rating.toFixed(1)}★` : 'No reviews yet'}
             </Text>
           </View>
         </View>
@@ -223,11 +225,6 @@ export function ExpertProfileScreen() {
         </View>
 
         {conflict ? <InlineErrorText message={conflict} /> : null}
-        {conflict.toLowerCase().includes('pro subscription') ? (
-          <Pressable onPress={() => nav.navigate('Subscription')} accessibilityRole="button" style={styles.proLinkTouch}>
-            <Text style={[styles.proLinkText, { color: colors.primary }]}>Subscribe to Pro to book sessions</Text>
-          </Pressable>
-        ) : null}
 
         {/* Calendar Picker */}
         <CyberCutBox
@@ -280,6 +277,56 @@ export function ExpertProfileScreen() {
             </View>
           </CyberCutBox>
         ) : null}
+
+        {/* Section: Reviews — written by people who actually had a session with this expert */}
+        <View style={styles.sectionHeaderWrap}>
+          <View style={styles.reviewsTitleRow}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Reviews</Text>
+            {expert.reviewCount > 0 ? (
+              <View style={styles.reviewsSummary}>
+                <Ionicons name="star" size={14} color="#FFB800" />
+                <Text style={[styles.reviewsSummaryText, { color: colors.text }]}>{expert.rating.toFixed(1)}</Text>
+                <Text style={[styles.reviewsSummaryCount, { color: colors.muted }]}>· {expert.reviewCount} {expert.reviewCount === 1 ? 'REVIEW' : 'REVIEWS'}</Text>
+              </View>
+            ) : null}
+          </View>
+          <LinearGradient
+            colors={[colors.primary, isDark ? 'rgba(216, 60, 255, 0.6)' : 'rgba(216, 60, 255, 0.3)', 'transparent']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.glowingLine, { marginTop: 6 }]}
+          />
+        </View>
+
+        {reviews.length === 0 ? (
+          <Text style={[styles.reviewsEmpty, { color: colors.muted }]}>
+            No reviews yet. After a session, the person who booked can rate and review it.
+          </Text>
+        ) : (
+          <View style={{ gap: 10 }}>
+            {reviews.map((r) => (
+              <CyberCutBox key={r.id} cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.reviewCard}>
+                <View style={styles.reviewInner}>
+                  <View style={styles.reviewHeader}>
+                    <CutAvatar source={resolveAvatarSource(r.reviewerAvatarUri, r.reviewerAvatarId)} size={34} cut={9} borderWidth={1} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.reviewName, { color: colors.text }]} numberOfLines={1}>{r.reviewerName}</Text>
+                      <View style={styles.reviewStars}>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <Ionicons key={n} name={n <= r.rating ? 'star' : 'star-outline'} size={12} color="#FFB800" />
+                        ))}
+                      </View>
+                    </View>
+                    <Text style={[styles.reviewDate, { color: colors.muted2 }]}>
+                      {new Date(r.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </Text>
+                  </View>
+                  {r.comment ? <Text style={[styles.reviewComment, { color: colors.text }]}>{r.comment}</Text> : null}
+                </View>
+              </CyberCutBox>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* Confirmation Modal Sheet */}
@@ -291,6 +338,17 @@ export function ExpertProfileScreen() {
         danger={false}
         onClose={() => setPick(null)}
         onConfirm={confirm}
+      />
+
+      <ProRequiredSheet
+        visible={showProSheet}
+        title="Booking is a Pro feature"
+        body={`Booking a 15-minute session with ${expert.name} is a paid feature. Upgrade to Pro to book expert sessions.`}
+        onClose={() => setShowProSheet(false)}
+        onUpgrade={() => {
+          setShowProSheet(false);
+          nav.navigate('Subscription');
+        }}
       />
     </View>
   );
@@ -436,20 +494,24 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 1,
   },
-  proLinkTouch: {
-    paddingVertical: 6,
-  },
-  proLinkText: {
-    fontFamily: fonts.bodyMed,
-    fontSize: 12,
-    color: '#00F0FF',
-  },
   calendarCutCard: {
     width: '100%',
   },
   calendarInner: {
     padding: 14,
   },
+  reviewsTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  reviewsSummary: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  reviewsSummaryText: { fontFamily: fonts.mono, fontSize: 13, fontWeight: '700' },
+  reviewsSummaryCount: { fontFamily: fonts.mono, fontSize: 11 },
+  reviewsEmpty: { fontFamily: fonts.body, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  reviewCard: { width: '100%' },
+  reviewInner: { padding: 14, gap: 10 },
+  reviewHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reviewName: { fontFamily: fonts.bodySemi, fontSize: 13.5 },
+  reviewStars: { flexDirection: 'row', gap: 2, marginTop: 3 },
+  reviewDate: { fontFamily: fonts.mono, fontSize: 10 },
+  reviewComment: { fontFamily: fonts.body, fontSize: 13.5, lineHeight: 20 },
   doneBox: {
     width: '100%',
     marginTop: 12,

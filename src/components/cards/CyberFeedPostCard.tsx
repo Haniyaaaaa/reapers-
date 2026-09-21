@@ -4,9 +4,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { LoadMoreButton } from '../feedback/LoadMoreButton';
 import { PostReactionSheet, QuickReactionBar } from '../feed/PostReactionSheet';
-import { getCyberAvatarSource } from '../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../data/cyberAvatars';
 import { fonts, useTheme } from '../../theme';
 import type { FeedPost } from '../../types/post';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 function timeAgo(iso: string): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -109,10 +110,10 @@ export function CyberFeedPostCard({
     <View style={styles.container}>
       {/* 1. Post Creator Box matching Figma spec */}
       <CyberCutBox
-        cutSize={16}
+        cutSize={24}
         radius={6}
-        fill="rgba(18, 14, 36, 0.85)"
-        borderColor="rgba(168, 85, 247, 0.38)"
+        fill="rgba(18, 14, 36, 0.6)"
+        borderColor="rgba(168, 85, 247, 0.2)"
         borderWidth={1}
         glass
         style={styles.composerCard}
@@ -262,10 +263,10 @@ export function CyberFeedPostCard({
         posts.map((post) => (
           <CyberCutBox
             key={post.id}
-            cutSize={16}
+            cutSize={24}
             radius={6}
-            fill="rgba(18, 14, 36, 0.85)"
-            borderColor="rgba(168, 85, 247, 0.38)"
+            fill="rgba(18, 14, 36, 0.6)"
+            borderColor="rgba(168, 85, 247, 0.2)"
             borderWidth={1}
             glass
             style={styles.postCard}
@@ -273,23 +274,14 @@ export function CyberFeedPostCard({
             <View style={styles.postInner}>
               {/* Header: Author Avatar + Name + Meta */}
               <View style={styles.postHeaderRow}>
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill="rgba(168, 85, 247, 0.2)"
+                <CutAvatar
+                  source={resolveAvatarSource(post.authorAvatarUri, post.authorAvatarId)}
+                  size={50}
+                  cut={11}
                   borderColor="rgba(192, 132, 252, 0.35)"
                   borderWidth={1}
-                  style={styles.postAvatarBox}
-                >
-                  <Image
-                    source={
-                      post.authorAvatarUri
-                        ? { uri: post.authorAvatarUri }
-                        : getCyberAvatarSource(post.authorAvatarId)
-                    }
-                    style={styles.avatarImg}
-                  />
-                </CyberCutBox>
+                  fill="rgba(168, 85, 247, 0.2)"
+                />
 
                 <View style={styles.postAuthorInfo}>
                   <Text style={[styles.authorName, { color: colors.text }]}>{post.authorName}</Text>

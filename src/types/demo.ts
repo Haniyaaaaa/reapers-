@@ -22,5 +22,9 @@ export type Demo = {
   isJamEntry: boolean;
   playCount?: number;
   screenshotUrls?: string[];
+  tags: string[];
+  platforms: string[];
+  portfolioUrl?: string;
+  pressKitUrl?: string;
   createdAt: string;
 };

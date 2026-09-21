@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
@@ -9,6 +8,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
+import { CutAvatar } from '../avatars/CutAvatar';
 import { fonts, useTheme } from '../../theme';
 
 const DEFAULT_COMMUNITY_AVATAR = require('../../../assets/avatars/extracted/male_4.jpg');
@@ -43,25 +43,24 @@ export function CyberCommunityWideCard({
   return (
     <Pressable onPress={onPress} style={styles.container} accessibilityRole="button">
       <CyberCutBox
-        cutSize={14}
+        cutSize={18}
         radius={6}
-        fill="rgba(14, 20, 35, 0.88)"
+        fill={isLight ? colors.cardFill : 'rgba(18, 14, 36, 0.6)'}
+        borderColor={isLight ? colors.cardBorder : 'rgba(168, 85, 247, 0.2)'}
+        borderWidth={1}
+        glass
         style={styles.cutCard}
       >
         <View style={styles.cardInner}>
           {/* Avatar Box on Left */}
-          <View style={styles.avatarWrap}>
-            <CyberCutBox
-              cutSize={8}
-              radius={4}
-              fill={isLight ? colors.surfaceElevated : '#161B2E'}
-              borderColor={isLight ? colors.electricAccent : 'rgba(0, 229, 255, 0.4)'}
-              borderWidth={1}
-              style={styles.avatarCutBox}
-            >
-              <Image source={resolvedSource} style={styles.avatarImg} />
-            </CyberCutBox>
-          </View>
+          <CutAvatar
+            source={resolvedSource}
+            size={48}
+            cut={12}
+            borderWidth={1}
+            borderColor={isLight ? colors.electricAccent : 'rgba(0, 229, 255, 0.4)'}
+            fill={isLight ? colors.surfaceElevated : '#161B2E'}
+          />
 
           {/* Right Content Column */}
           <View style={styles.contentCol}>

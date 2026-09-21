@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { ClipPath, Defs, G, Image as SvgImage, LinearGradient as SvgGradient, Path, Rect, Stop } from 'react-native-svg';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
 
@@ -22,23 +22,28 @@ interface CyberEventCardProps {
   badge?: string;
   tags?: string[];
   membersCount?: string;
+  showAvatars?: boolean;
   imageUri?: string;
   imageSource?: ImageSourcePropType;
   onPress?: () => void;
 }
 
-const DEFAULT_EVENT_IMAGE = require('../../../assets/avatars/extracted/male_1.jpg');
+const CUT_SIZE = 24;
+const BANNER_HEIGHT = 140;
 
 export function CyberEventCard({
-  title = 'Hollow Meridian — Launch Watch Party',
+  title = 'Karachi Game Dev Meetup',
   dateStr = 'FRI, 12 SEP · 19:00',
   badge = 'LIVE IN 2 DAYS',
-  tags = ['WATCH PARTY', 'FREE'],
+  tags = ['MEETUP', 'FREE'],
   membersCount = '180+ MEMBERS',
+  showAvatars = true,
+  imageUri,
   imageSource,
   onPress,
 }: CyberEventCardProps) {
   const { colors, isLight } = useTheme();
+  const [bannerWidth, setBannerWidth] = useState(0);
   // Overlapping avatar head thumbnails
   const stackAvatars = [
     require('../../../assets/avatars/extracted/male_4.jpg'),
@@ -49,37 +54,49 @@ export function CyberEventCard({
   return (
     <Pressable onPress={onPress} style={styles.cardPressable} accessibilityRole="button">
       <CyberCutBox
-        cutSize={16}
+        cutSize={CUT_SIZE}
         radius={6}
-        fill={isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.85)'}
-        borderColor={isLight ? colors.cardBorder : 'rgba(109, 53, 255, 0.3)'}
+        fill={isLight ? colors.cardFill : 'rgba(18, 14, 36, 0.6)'}
+        borderColor={isLight ? colors.cardBorder : 'rgba(168, 85, 247, 0.2)'}
         borderWidth={1}
+        glass
         style={styles.cutCard}
       >
         <View style={styles.cardContent}>
           {/* Banner Graphic with Dark Overlay */}
-          <View style={styles.imageWrap}>
-            <Image
-              source={imageSource || stackAvatars[0]}
-              style={styles.bannerImage}
-              resizeMode="cover"
-            />
-            <LinearGradient
-              colors={
-                isLight
-                  ? ['rgba(15, 23, 42, 0.1)', 'rgba(15, 23, 42, 0.6)', colors.cardFill]
-                  : ['rgba(9, 15, 28, 0.2)', 'rgba(9, 15, 28, 0.88)', '#090F1C']
-              }
-              locations={[0, 0.65, 1]}
-              style={StyleSheet.absoluteFill}
-            />
+          <View style={styles.imageWrap} onLayout={(e) => setBannerWidth(e.nativeEvent.layout.width)}>
+            {bannerWidth > 0 && (
+              // Drawn through SVG so the banner is clipped to the card's top-left chamfer
+              // instead of a plain rectangle covering the cut corner.
+              <Svg width={bannerWidth} height={BANNER_HEIGHT} style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <ClipPath id="bannerClip">
+                    <Path d={`M ${CUT_SIZE} 0 L ${bannerWidth} 0 L ${bannerWidth} ${BANNER_HEIGHT} L 0 ${BANNER_HEIGHT} L 0 ${CUT_SIZE} Z`} />
+                  </ClipPath>
+                  <SvgGradient id="bannerShade" x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor={isLight ? '#0F172A' : '#090F1C'} stopOpacity={isLight ? 0.1 : 0.2} />
+                    <Stop offset="0.65" stopColor={isLight ? '#0F172A' : '#090F1C'} stopOpacity={isLight ? 0.6 : 0.88} />
+                    <Stop offset="1" stopColor={isLight ? colors.cardFill : '#090F1C'} stopOpacity={1} />
+                  </SvgGradient>
+                </Defs>
+                <G clipPath="url(#bannerClip)">
+                  <SvgImage
+                    href={imageSource || (imageUri ? { uri: imageUri } : stackAvatars[0])}
+                    width={bannerWidth}
+                    height={BANNER_HEIGHT}
+                    preserveAspectRatio="xMidYMid slice"
+                  />
+                  <Rect width={bannerWidth} height={BANNER_HEIGHT} fill="url(#bannerShade)" />
+                </G>
+              </Svg>
+            )}
 
             {/* Floating Top-Right "LIVE IN 2 DAYS" Badge */}
             <View style={styles.liveBadge}>
               <Text style={styles.liveBadgeText}>{badge}</Text>
             </View>
 
-            {/* Badges on Image (WATCH PARTY, FREE) */}
+            {/* Badges on Image (MEETUP, FREE) */}
             <View style={styles.tagsRow}>
               {tags.map((tag, i) => {
                 const isCyan = i === 0;
@@ -116,7 +133,7 @@ export function CyberEventCard({
 
               {/* Overlapping Avatar Stack */}
               <View style={styles.avatarStack}>
-                {stackAvatars.map((src, idx) => (
+                {(showAvatars ? stackAvatars : []).map((src, idx) => (
                   <View
                     key={idx}
                     style={[
@@ -154,13 +171,9 @@ const styles = StyleSheet.create({
   },
   imageWrap: {
     width: '100%',
-    height: 140,
+    height: BANNER_HEIGHT,
     position: 'relative',
     overflow: 'hidden',
-  },
-  bannerImage: {
-    width: '100%',
-    height: '100%',
   },
   liveBadge: {
     position: 'absolute',

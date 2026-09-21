@@ -17,9 +17,14 @@ export type Chatroom = {
   peerId?: string;
   isPrivate?: boolean;
   requiresApproval?: boolean;
+  /** True once the viewer has an outstanding (unresponded) join request for this room —
+   * tapping it should show that status instead of re-prompting to join. */
+  joinRequestPending?: boolean;
   pinned?: boolean;
   muted?: boolean;
   avatar?: string;
+  /** DM only: the other person's preset avatar id (used when they have no uploaded photo). */
+  avatarId?: string;
   communityId?: string;
   logo?: ImageSourcePropType;
   createdBy?: string;
@@ -61,13 +66,14 @@ export type ChatMessage = {
   senderId: string;
   senderName: string;
   senderAvatar?: string;
+  senderAvatarId?: string;
   content: string;
   createdAt: string;
   status: 'sent' | 'sending' | 'failed';
   mine?: boolean;
   edited?: boolean;
   deleted?: boolean;
-  kind?: 'text' | 'gif' | 'voice' | 'image' | 'video';
+  kind?: 'text' | 'gif' | 'voice' | 'image' | 'video' | 'sticker';
   gifUri?: string;
   voiceDurationSec?: number;
   mediaUrl?: string;

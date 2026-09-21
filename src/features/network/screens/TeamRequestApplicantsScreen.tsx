@@ -19,7 +19,7 @@ export function TeamRequestApplicantsScreen() {
   const { params } = useRoute<RouteProp<MainStackParamList, 'TeamRequestApplicants'>>();
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { colors } = useTheme();
-  const team = useNetworkStore((s) => s.teams.find((t) => t.id === params.teamRequestId));
+  const team = useNetworkStore((s) => s.teams.find((t) => t.id === params.teamRequestId) ?? s.myTeams.find((t) => t.id === params.teamRequestId));
   const applicants = useNetworkStore((s) => s.applicantsByTeam[params.teamRequestId] ?? EMPTY_ARRAY);
   const loading = useNetworkStore((s) => s.applicantsLoading[params.teamRequestId] ?? false);
   const fetchApplicants = useNetworkStore((s) => s.fetchApplicants);
@@ -41,7 +41,7 @@ export function TeamRequestApplicantsScreen() {
         {applicants.map((a) => (
           <BladeCard key={a.id} style={styles.row}>
             <Pressable onPress={() => useProfilePreviewStore.getState().open(a.id)} style={{ flexDirection: 'row', gap: 14, alignItems: 'center', flex: 1 }}>
-              <AvatarRing name={a.displayName} size={48} />
+              <AvatarRing name={a.displayName} uri={a.avatarUri} avatarId={a.avatarId} size={48} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.name, { color: colors.text }]}>{a.displayName}</Text>
                 <Text style={[styles.muted, { color: colors.muted }]}>{a.roles.join(' · ')}</Text>

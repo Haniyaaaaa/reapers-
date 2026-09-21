@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -26,6 +25,7 @@ import { CyberTextField } from '../../../components/cyber/CyberTextField';
 import { useAuth } from '../../../hooks/useAuth';
 import { fonts, useTheme } from '../../../theme';
 import { isEmail } from '../../../utils/validation';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FORM_MAX_WIDTH = Math.min(SCREEN_WIDTH - 40, 420);
@@ -86,7 +86,7 @@ export function LoginScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          <ScrollView
+          <KeyboardAwareScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -198,7 +198,7 @@ export function LoginScreen() {
                 By continuing you agree to the REAPERS Terms and Community Guidelines.
               </Text>
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>

@@ -1,4 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
+import { openExternalUrl } from '../../../utils/openUrl';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -62,7 +63,7 @@ function BookingRow({
 
         {booking.role === 'requester' && cancellable ? (
           booking.expertMeetingLink ? (
-            <Pressable onPress={() => Linking.openURL(booking.expertMeetingLink!)} accessibilityRole="button" style={{ marginTop: 4 }}>
+            <Pressable onPress={() => openExternalUrl(booking.expertMeetingLink)} accessibilityRole="button" style={{ marginTop: 4 }}>
               <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed, fontSize: 12 }}>Join call</Text>
             </Pressable>
           ) : (

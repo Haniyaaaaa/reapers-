@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -15,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
+import { goBackOrHome } from '../../../navigation/goBackOrHome';
 import type { MainStackParamList } from '../../../navigation/types';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { AuthTextField } from '../../../components/inputs/AuthTextField';
@@ -26,9 +26,12 @@ import { brandLogo } from '../../../data/brand';
 import { streakOptions } from '../../../data/streaks';
 import { getCyberAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
+import { useTourStore } from '../../../store/tourStore';
 import { useUiStore } from '../../../store/uiStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { fonts, useTheme } from '../../../theme';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 function CyberRow({
   label,
@@ -68,11 +71,9 @@ function CyberRow({
 export function SettingsScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const insets = useSafeAreaInsets();
-  const { logout, deleteAccount, user } = useAuth();
+  const { logout, deleteAccount, user, refreshUser } = useAuth();
   const { colors, light } = useTheme();
 
-  const offline = useUiStore((s) => s.offline);
-  const setOffline = useUiStore((s) => s.setOffline);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
   const streakEmoji = useUiStore((s) => s.streakEmoji);
@@ -84,6 +85,11 @@ export function SettingsScreen() {
   const updatePref = useSettingsStore((s) => s.updatePref);
   const fetchBlocked = useSettingsStore((s) => s.fetchBlocked);
   const unblockUser = useSettingsStore((s) => s.unblockUser);
+
+  const refreshControl = useRefreshControl(async () => {
+    if (!user) return;
+    await Promise.all([refreshUser(), fetchSettings(user.id), fetchBlocked(user.id)]);
+  });
 
   const [out, setOut] = useState(false);
   const [deleteStep, setDeleteStep] = useState<'none' | 'confirm' | 'type'>('none');
@@ -110,7 +116,7 @@ export function SettingsScreen() {
 
       {/* Top Header Bar */}
       <View style={[styles.headerBar, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => nav.goBack()} style={styles.headerBtn} accessibilityRole="button">
+        <Pressable onPress={() => goBackOrHome(nav)} style={styles.headerBtn} accessibilityRole="button">
           <CyberCutBox
             cutSize={8}
             radius={4}
@@ -128,8 +134,9 @@ export function SettingsScreen() {
         <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 40 }]}
       >
         {/* User Profile Card */}
@@ -143,9 +150,7 @@ export function SettingsScreen() {
             style={styles.profileCardCut}
           >
             <View style={styles.profileCardInner}>
-              <View style={[styles.avatarBorder, { borderColor: colors.electricAccent }]}>
-                <Image source={avatarSrc} style={styles.avatarImg} />
-              </View>
+              <CutAvatar source={avatarSrc} size={48} cut={12} borderColor={colors.electricAccent} borderWidth={1.5} fill={colors.surfaceElevated} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.profileName, { color: colors.text }]}>{user?.displayName ?? 'Player'}</Text>
                 <Text style={[styles.profileUser, { color: colors.muted }]}>@{user?.username ?? 'reaper'}</Text>
@@ -352,6 +357,11 @@ export function SettingsScreen() {
               <Text style={[styles.rowLabel, { color: colors.text }]}>Support</Text>
               <Text style={[styles.cyanLinkText, { color: colors.electricAccent }]}>Open</Text>
             </Pressable>
+            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            <Pressable onPress={() => useTourStore.getState().start()} style={styles.row} accessibilityRole="button">
+              <Text style={[styles.rowLabel, { color: colors.text }]}>App tour</Text>
+              <Text style={[styles.cyanLinkText, { color: colors.electricAccent }]}>Replay</Text>
+            </Pressable>
             {user?.isAdmin ? (
               <>
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -361,27 +371,6 @@ export function SettingsScreen() {
                 </Pressable>
               </>
             ) : null}
-          </View>
-        </CyberCutBox>
-
-        {/* Section: Debug */}
-        <Text style={[styles.sectionHeader, { color: colors.text }]}>Debug</Text>
-        <CyberCutBox
-          cutSize={10}
-          radius={8}
-          fill={colors.cardFill}
-          borderColor={colors.cardBorder}
-          borderWidth={0.88}
-          style={styles.cardCut}
-        >
-          <View style={styles.cardInner}>
-            <CyberRow
-              label="Simulate offline"
-              hint="Retry banners and queued sends"
-              value={offline}
-              onValueChange={setOffline}
-              activeColor="#F5C542"
-            />
           </View>
         </CyberCutBox>
 
@@ -427,7 +416,7 @@ export function SettingsScreen() {
             </View>
           </CyberCutBox>
         </Pressable>
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Confirmation Sheets & Modals */}
       <ConfirmSheet

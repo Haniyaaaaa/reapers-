@@ -6,6 +6,7 @@ import { SplashScreen as SplashView } from '../features/auth/screens/SplashScree
 import { OnboardingScreen } from '../features/onboarding/screens/OnboardingScreen';
 import { PendingApprovalScreen } from '../features/onboarding/screens/PendingApprovalScreen';
 import { ProfilePreviewSheet } from '../components/profile/ProfilePreviewSheet';
+import { AppTour } from '../features/tour/AppTour';
 import { useAuth } from '../hooks/useAuth';
 import { joinPresence, subscribeOnlineUsers } from '../services/supabase/presence';
 import { subscribeToConnectionChanges } from '../services/supabase/network';
@@ -24,6 +25,17 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export function RootNavigator() {
   const { hydrated, isSignedIn, onboarded, user, passwordRecovery } = useAuth();
   const { colors, light } = useTheme();
+  // Admin approval only gates Game Developers and Experts — Gamer-only accounts go straight in.
+  const isGamerOnly = !!user && user.roles.length > 0 && user.roles.every((r) => r === 'gamer');
+  // True while the person can be in the member app — the tour must never appear over auth,
+  // onboarding or the pending-approval screen. Admins skip onboarding/approval entirely and can step
+  // into the member app ("View as member"), so they qualify too; they just don't get the tour
+  // auto-started (see `autoStart` below) — they can still run it from Settings > App tour > Replay.
+  const inMemberApp =
+    isSignedIn &&
+    !passwordRecovery &&
+    !!user &&
+    (user.isAdmin || (onboarded && user.approvalStatus !== 'rejected' && !(user.approvalStatus === 'pending' && !isGamerOnly)));
   const setOnlineUserIds = usePresenceStore((s) => s.setOnlineUserIds);
   const fetchPeople = useNetworkStore((s) => s.fetchPeople);
   const fetchConnections = useNetworkStore((s) => s.fetchConnections);
@@ -88,13 +100,14 @@ export function RootNavigator() {
           </>
         ) : !onboarded || user?.approvalStatus === 'rejected' ? (
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        ) : user?.approvalStatus === 'pending' ? (
+        ) : user?.approvalStatus === 'pending' && !isGamerOnly ? (
           <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
         ) : (
           <Stack.Screen name="Main" component={MainNavigator} />
         )}
       </Stack.Navigator>
       <ProfilePreviewSheet />
+      <AppTour enabled={inMemberApp} autoStart={!user?.isAdmin} user={user} />
     </NavigationContainer>
   );
 }

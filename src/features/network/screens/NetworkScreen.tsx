@@ -2,9 +2,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,28 +15,37 @@ import type { MainStackParamList } from '../../../navigation/types';
 import { CyberDeveloperCard } from '../../../components/cards/CyberDeveloperCard';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
-import { CyberFilterModal } from '../../../components/cyber/CyberFilterModal';
+import { TeamFilterSheet } from '../../../components/network/TeamFilterSheet';
+import { EMPTY_TEAM_FILTERS, teamFilterCount, teamFiltersToApi, type TeamFilterSelection } from '../../../utils/teamRequest';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
 import { EmptyState } from '../../../components/feedback/EmptyState';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { RetryBanner } from '../../../components/feedback/RetryBanner';
 import { Skeleton } from '../../../components/feedback/Skeleton';
 import { Screen } from '../../../components/layout/Screen';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { getCyberAvatarSource, resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useNetworkStore } from '../../../store/networkStore';
+import { STALE_MS } from '../../../store/swr';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchPeople, searchTeamRequests } from '../../../services/supabase/network';
 import { useChatStore } from '../../../store/chatStore';
 import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
 import { fonts, useTheme } from '../../../theme';
 import { personMatchScore, teamMatchScore } from '../../../utils/matching';
+import { TeamRequestCard } from '../../../components/cards/TeamRequestCard';
+import { AutoCarousel } from '../../../components/layout/AutoCarousel';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
+const SLIDER_COUNT = 5;
 const FILTERS = ['ALL', 'OPEN ROLES', 'DESIGN', 'DEVELOPERS', 'MY MATCHES'] as const;
 
 export function NetworkScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { colors } = useTheme();
-  const { isDeveloper, user } = useAuth();
+  const { user } = useAuth();
 
   const people = useNetworkStore((s) => s.people);
   const teams = useNetworkStore((s) => s.teams);
@@ -55,21 +62,24 @@ export function NetworkScreen() {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [teamFilters, setTeamFilters] = useState<TeamFilterSelection>(EMPTY_TEAM_FILTERS);
+  const activeFilterCount = teamFilterCount(teamFilters);
 
+  const userId = user?.id;
   useEffect(() => {
-    if (user) {
-      fetchPeople(user.id);
-      fetchTeams(user.id);
+    if (userId) {
+      fetchPeople(userId, { ifStaleMs: STALE_MS });
+      fetchTeams(userId, undefined, { ifStaleMs: STALE_MS });
     }
-  }, [user, fetchPeople, fetchTeams]);
+  }, [userId, fetchPeople, fetchTeams]);
 
   // Re-fetch on every focus — a connection request you sent can get accepted/declined on the
   // other person's device with no realtime push to this one, so returning to this screen is
   // the only reliable moment to pick up the real status instead of a stale "Pending".
   useFocusEffect(
     useCallback(() => {
-      if (user) fetchPeople(user.id);
-    }, [user, fetchPeople]),
+      if (userId) fetchPeople(userId, { ifStaleMs: 10_000 });
+    }, [userId, fetchPeople]),
   );
 
   const refreshControl = useRefreshControl(async () => {
@@ -81,29 +91,38 @@ export function NetworkScreen() {
     [user?.skills, user?.roles],
   );
 
+  // Search asks the server so it covers every team request and person, not just the pages/100
+  // profiles already loaded (team filters still apply). The loaded data is filtered locally until
+  // each answer arrives.
+  const dq = useDebouncedValue(searchQuery);
+  const teamSearch = useServerSearch(dq, (n) => searchTeamRequests(n, teamFiltersToApi(teamFilters)), { deps: [teamFilters] });
+  const peopleSearch = useServerSearch(dq, (n) => searchPeople(user?.id ?? '', n), { enabled: !!user?.id });
+
   const filteredTeams = useMemo(() => {
-    let result = teams;
+    let result = teamSearch.results ?? teams;
     if (filter === 'MY MATCHES') {
       result = result.filter((t) => t.posterId === user?.id);
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    if (teamSearch.needle && teamSearch.results === null) {
+      const q = teamSearch.needle;
       result = result.filter(
         (t) =>
           t.project.toLowerCase().includes(q) ||
           t.excerpt.toLowerCase().includes(q) ||
+          (t.studio ?? '').toLowerCase().includes(q) ||
+          (t.engine ?? '').toLowerCase().includes(q) ||
           t.roles.some((r) => r.toLowerCase().includes(q)),
       );
     }
     return result
       .map((team) => ({ team, score: teamMatchScore(myTags, team) }))
       .sort((a, b) => b.score - a.score);
-  }, [teams, filter, searchQuery, user?.id, myTags]);
+  }, [teams, teamSearch.results, teamSearch.needle, filter, user?.id, myTags]);
 
   const filteredPeople = useMemo(() => {
-    let result = people.filter((p) => p.id !== user?.id);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    let result = (peopleSearch.results ?? people).filter((p) => p.id !== user?.id);
+    if (peopleSearch.needle && peopleSearch.results === null) {
+      const q = peopleSearch.needle;
       result = result.filter(
         (p) =>
           p.displayName.toLowerCase().includes(q) ||
@@ -114,7 +133,7 @@ export function NetworkScreen() {
     return result
       .map((person) => ({ person, score: personMatchScore(myTags, person) }))
       .sort((a, b) => b.score - a.score);
-  }, [people, searchQuery, user?.id, myTags]);
+  }, [people, peopleSearch.results, peopleSearch.needle, user?.id, myTags]);
 
   return (
     <Screen refreshControl={refreshControl}>
@@ -142,25 +161,23 @@ export function NetworkScreen() {
           </View>
         </View>
 
-        {isDeveloper ? (
-          <Pressable
-            onPress={() => nav.navigate('PostTeamRequest')}
-            style={styles.postBtnTouch}
-            accessibilityRole="button"
-            accessibilityLabel="Post team request"
+        <Pressable
+          onPress={() => nav.navigate('PostTeamRequest')}
+          style={styles.postBtnTouch}
+          accessibilityRole="button"
+          accessibilityLabel="Post team request"
+        >
+          <CyberCutBox
+            cutSize={8}
+            radius={4}
+            gradient
+            style={styles.postCutBox}
           >
-            <CyberCutBox
-              cutSize={8}
-              radius={4}
-              gradient
-              style={styles.postCutBox}
-            >
-              <View style={styles.postBtnInner}>
-                <Text style={styles.postBtnText}>+ Request</Text>
-              </View>
-            </CyberCutBox>
-          </Pressable>
-        ) : null}
+            <View style={styles.postBtnInner}>
+              <Text style={styles.postBtnText}>+ Request</Text>
+            </View>
+          </CyberCutBox>
+        </Pressable>
       </View>
 
       {/* Search Bar + Filter Options Button */}
@@ -178,7 +195,7 @@ export function NetworkScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search communities, demos, experts..."
+              placeholder="Search teams and people..."
               placeholderTextColor={colors.muted2}
               style={[styles.searchInput, { color: colors.text }]}
               autoCapitalize="none"
@@ -208,13 +225,19 @@ export function NetworkScreen() {
           >
             <View style={styles.filterBtnInner}>
               <Ionicons name="options-outline" size={20} color={colors.electricAccent} />
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
             </View>
           </CyberCutBox>
         </Pressable>
       </View>
 
       {/* Filter Chips Horizontal Row */}
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterChipsRow}
@@ -254,16 +277,14 @@ export function NetworkScreen() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {/* Section 1: Open Team Requests */}
       <View style={styles.sectionWrap}>
         <View style={styles.sectionHeaderWrap}>
           <View style={styles.sectionTitleRow}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Open team requests</Text>
-            <View style={styles.matchedBadge}>
-              <Text style={styles.matchedBadgeText}>MATCHED TO YOUR SKILLS</Text>
-            </View>
+            <CyberSeeAllButton onPress={() => nav.navigate('TeamRequestsList')} />
           </View>
           <LinearGradient
             colors={['#00F0FF', 'rgba(216, 60, 255, 0.6)', 'transparent']}
@@ -271,6 +292,9 @@ export function NetworkScreen() {
             end={{ x: 1, y: 0 }}
             style={styles.glowingLine}
           />
+          <View style={[styles.matchedBadge, { alignSelf: 'flex-start', marginTop: 10 }]}>
+            <Text style={styles.matchedBadgeText}>MATCHED TO YOUR SKILLS</Text>
+          </View>
         </View>
 
         {loading ? (
@@ -286,139 +310,25 @@ export function NetworkScreen() {
           <EmptyState title="No team requests active right now." />
         ) : null}
 
-        {/* Team Request Cards */}
-        {!loading && !error
-          ? filteredTeams.map(({ team, score }) => {
-              const isApplied = applied.has(team.id);
-              return (
-                <View key={team.id} style={styles.teamCardTouch}>
-                  <CyberCutBox
-                    cutSize={14}
-                    radius={8}
-                    fill={colors.cardFill}
-                    borderColor={colors.cardBorder}
-                    borderWidth={1}
-                    style={styles.teamCardCut}
-                  >
-                    <View style={styles.teamCardInner}>
-                      {/* Top Badges + Match Score */}
-                      <View style={styles.teamTopBadgesRow}>
-                        <View style={styles.roleBadgesRow}>
-                          <View style={styles.rolePill}>
-                            <Text style={styles.rolePillText}>
-                              {(team.roles[0] || 'SOUND DESIGNER').toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={[styles.slicePill, { backgroundColor: colors.cardBorder }]}>
-                            <Text style={[styles.slicePillText, { color: colors.muted }]}>VERTICAL SLICE</Text>
-                          </View>
-                        </View>
-                        <Text style={[styles.matchScoreText, { color: colors.text }]}>{`${score}% match`}</Text>
-                      </View>
-
-                      {/* Title & Studio info */}
-                      <View style={styles.teamTitleRow}>
-                        <View style={styles.teamAvatarBox}>
-                          <Image
-                            source={getCyberAvatarSource(team.posterId)}
-                            style={styles.teamAvatarImg}
-                          />
-                        </View>
-                        <View style={styles.teamTitleWrap}>
-                          <Text style={[styles.teamProjectTitle, { color: colors.text }]}>{team.project}</Text>
-                          <Text style={[styles.teamStudioSubtext, { color: colors.muted }]}>
-                            ASHFALL STUDIO · STUDIO · 4 PEOPLE
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* Excerpt Description */}
-                      <Text style={[styles.teamExcerptText, { color: colors.text }]} numberOfLines={2}>
-                        {team.excerpt ||
-                          'We have combat and UI hooks wired; we need an implementer to own the adaptive layer through demo launch.'}
-                      </Text>
-
-                      {/* Engine & Location Grid */}
-                      <View style={[styles.teamDetailGrid, { backgroundColor: colors.inputFill }]}>
-                        <View style={styles.gridCol}>
-                          <Text style={[styles.gridLabel, { color: colors.muted2 }]}>ENGINE</Text>
-                          <Text style={[styles.gridValue, { color: colors.text }]}>Unity</Text>
-                        </View>
-                        <View style={styles.gridCol}>
-                          <Text style={[styles.gridLabel, { color: colors.muted2 }]}>LOCATION</Text>
-                          <Text style={[styles.gridValue, { color: colors.text }]}>Remote · UTC+3</Text>
-                        </View>
-                      </View>
-
-                      {/* Skill Tags */}
-                      <View style={styles.tagsRow}>
-                        {(team.roles.length > 0 ? team.roles : ['SOUND DESIGNER', 'WWISE', 'ADAPTIVE MUSIC']).map(
-                          (r) => (
-                            <View key={r} style={styles.tagPill}>
-                              <Text style={styles.tagText}>{r.toUpperCase()}</Text>
-                            </View>
-                          ),
-                        )}
-                      </View>
-
-                      {/* Footer Row */}
-                      <View style={[styles.teamFooterRow, { borderTopColor: colors.cardBorder }]}>
-                        <Text style={[styles.hoursRevText, { color: colors.muted }]}>~10 HRS/WEEK · REV</Text>
-
-                        <View style={styles.actionBtnsRow}>
-                          <Pressable
-                            onPress={() => useProfilePreviewStore.getState().open(team.posterId)}
-                            style={styles.portfolioBtnTouch}
-                            accessibilityRole="button"
-                          >
-                            <CyberCutBox
-                              cutSize={6}
-                              radius={4}
-                              fill={colors.inputFill}
-                              borderColor={colors.cardBorder}
-                              borderWidth={1}
-                              style={styles.portfolioCutBox}
-                            >
-                              <Text style={[styles.portfolioBtnText, { color: colors.muted }]}>PORTFOLIO</Text>
-                            </CyberCutBox>
-                          </Pressable>
-
-                          <Pressable
-                            onPress={async () => {
-                              if (!user || isApplied) return;
-                              await applyTeam(user.id, team.id);
-                            }}
-                            disabled={isApplied}
-                            style={styles.requestJoinTouch}
-                            accessibilityRole="button"
-                          >
-                            <CyberCutBox
-                              cutSize={6}
-                              radius={4}
-                              gradient={!isApplied}
-                              fill={isApplied ? 'rgba(255, 255, 255, 0.1)' : undefined}
-                              borderColor={isApplied ? 'rgba(255, 255, 255, 0.2)' : undefined}
-                              borderWidth={isApplied ? 1 : 0}
-                              style={styles.requestJoinCutBox}
-                            >
-                              <View style={styles.requestJoinInner}>
-                                <Text style={styles.requestJoinText}>
-                                  {isApplied ? 'REQUESTED' : 'REQUEST TO JOIN'}
-                                </Text>
-                              </View>
-                            </CyberCutBox>
-                          </Pressable>
-                        </View>
-                      </View>
-                    </View>
-                  </CyberCutBox>
-                </View>
-              );
-            })
-          : null}
-
+        {/* Team Request Cards — auto-advancing slider of the best matches; "See all" has the rest */}
         {!loading && !error && filteredTeams.length > 0 ? (
-          <LoadMoreButton hasMore={teamsHasMore} onPress={loadMoreTeams} />
+          <AutoCarousel
+            items={filteredTeams.slice(0, SLIDER_COUNT)}
+            keyExtractor={({ team }) => team.id}
+            showDots
+            renderItem={({ team, score }) => (
+              <TeamRequestCard
+                team={team}
+                score={score}
+                applied={applied.has(team.id)}
+                onApply={() => {
+                  if (user && !applied.has(team.id)) applyTeam(user.id, team.id);
+                }}
+                onPosterPress={() => useProfilePreviewStore.getState().open(team.posterId)}
+                onPress={() => nav.navigate('TeamRequestDetail', { id: team.id })}
+              />
+            )}
+          />
         ) : null}
       </View>
 
@@ -438,7 +348,8 @@ export function NetworkScreen() {
           <CyberSeeAllButton onPress={() => nav.navigate('PeopleList')} />
         </View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
+          keyboardShouldPersistTaps="handled"
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.developersScroll}
@@ -450,7 +361,8 @@ export function NetworkScreen() {
               name={person.displayName}
               role={person.roles[0] || 'Game Developer'}
               matchScore={`${score}%`}
-              avatarSource={getCyberAvatarSource(person.id)}
+              avatarUri={person.avatarUri}
+              avatarSource={getCyberAvatarSource(person.avatarId)}
               status={person.connect}
               onConnect={async () => {
                 if (!user || person.connect !== 'connect') return;
@@ -458,19 +370,36 @@ export function NetworkScreen() {
               }}
             />
           ))}
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </View>
 
-      <CyberFilterModal
+      <TeamFilterSheet
         visible={showFilterModal}
+        value={teamFilters}
+        onApply={(next) => {
+          setTeamFilters(next);
+          if (user) fetchTeams(user.id, teamFiltersToApi(next));
+        }}
         onClose={() => setShowFilterModal(false)}
-        onApply={() => {}}
       />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  filterBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#D83CFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { fontFamily: fonts.monoBold, fontSize: 9, color: '#FFFFFF' },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -646,142 +575,6 @@ const styles = StyleSheet.create({
   loadingContainer: {
     gap: 14,
   },
-  teamCardTouch: {
-    marginBottom: 16,
-  },
-  teamCardCut: {
-    width: '100%',
-  },
-  teamCardInner: {
-    padding: 16,
-    gap: 12,
-  },
-  teamTopBadgesRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  roleBadgesRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  rolePill: {
-    backgroundColor: 'rgba(216, 60, 255, 0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(216, 60, 255, 0.65)',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  rolePillText: {
-    fontFamily: fonts.mono,
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: '#D83CFF',
-    letterSpacing: 0.5,
-  },
-  slicePill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  slicePillText: {
-    fontFamily: fonts.mono,
-    fontSize: 9.5,
-    color: '#8E9BB5',
-    letterSpacing: 0.5,
-  },
-  matchScoreText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  teamTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  teamAvatarBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#00F0FF',
-    overflow: 'hidden',
-  },
-  teamAvatarImg: {
-    width: '100%',
-    height: '100%',
-  },
-  teamTitleWrap: {
-    flex: 1,
-    gap: 2,
-  },
-  teamProjectTitle: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  teamStudioSubtext: {
-    fontFamily: fonts.mono,
-    fontSize: 9.5,
-    color: '#8E9BB5',
-    letterSpacing: 0.4,
-  },
-  teamExcerptText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    color: '#A6B4CE',
-    lineHeight: 19,
-  },
-  teamDetailGrid: {
-    flexDirection: 'row',
-    gap: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(9, 15, 28, 0.6)',
-    borderRadius: 6,
-  },
-  gridCol: {
-    flex: 1,
-    gap: 2,
-  },
-  gridLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#60718F',
-    letterSpacing: 0.6,
-  },
-  gridValue: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    color: '#A6B4CE',
-  },
-  tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  tagPill: {
-    backgroundColor: 'rgba(109, 53, 255, 0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(109, 53, 255, 0.35)',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  tagText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#D83CFF',
-    letterSpacing: 0.5,
-  },
   headerLeftGroup: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -808,62 +601,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  teamFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-    gap: 6,
-  },
-  hoursRevText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: '#8E9BB5',
-    letterSpacing: 0.3,
-    flexShrink: 1,
-  },
-  actionBtnsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  portfolioBtnTouch: {
-    height: 30,
-  },
-  portfolioCutBox: {
-    height: 30,
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  portfolioBtnText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#8E9BB5',
-    letterSpacing: 0.4,
-  },
-  requestJoinTouch: {
-    height: 30,
-  },
-  requestJoinCutBox: {
-    height: 30,
-  },
-  requestJoinInner: {
-    height: '100%',
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  requestJoinText: {
-    fontFamily: fonts.mono,
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.4,
   },
   developersScroll: {
     paddingRight: 16,

@@ -1,8 +1,9 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as eventsApi from '../services/supabase/events';
 import { captureException } from '../services/analytics/analytics';
 import { playSound } from '../services/sound';
-import type { EventPaymentApplication, GameEvent, PayoutAccount, RsvpStatus } from '../types/event';
+import type { EventPaymentApplication, GameEvent, PayoutAccount, RsvpStatus, TicketPlan } from '../types/event';
 import type { EventAttendee } from '../services/supabase/events';
 
 type EventState = {
@@ -14,7 +15,7 @@ type EventState = {
   loading: boolean;
   error: string | null;
   attendees: Record<string, EventAttendee[]>;
-  fetchEvents: (userId: string) => Promise<void>;
+  fetchEvents: (userId: string, opts?: FetchOpts) => Promise<void>;
   loadMoreEvents: (userId: string) => Promise<void>;
   createEvent: (input: {
     hostId: string;
@@ -23,21 +24,25 @@ type EventState = {
     type: GameEvent['type'];
     category?: GameEvent['category'];
     startsAt: string;
+    endsAt?: string;
     location: string;
+    venue?: string;
     lat?: number;
     lng?: number;
     coverUrl?: string;
     maxAttendees?: number;
+    registrationClosesBeforeMin?: number;
     paid: boolean;
     price?: number;
     currency?: string;
     payoutContactNote?: string;
     payoutAccounts?: { bankName: string; accountTitle: string; accountNumber: string; iban?: string }[];
+    ticketPlans?: { name: string; price: number }[];
   }) => Promise<GameEvent>;
   setRsvp: (eventId: string, userId: string, status: RsvpStatus, paidByUser?: boolean) => Promise<void>;
   updateEvent: (
     id: string,
-    patch: { title?: string; description?: string; location?: string; startsAt?: string; coverUrl?: string; maxAttendees?: number | null },
+    patch: { title?: string; description?: string; location?: string; startsAt?: string; endsAt?: string | null; venue?: string | null; coverUrl?: string; maxAttendees?: number | null; registrationClosesBeforeMin?: number },
   ) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
   fetchAttendees: (eventId: string) => Promise<void>;
@@ -50,8 +55,11 @@ type EventState = {
 
   myApplication: Record<string, EventPaymentApplication | null>;
   fetchMyApplication: (eventId: string, userId: string) => Promise<void>;
-  submitApplication: (input: { eventId: string; applicantId: string; payoutAccountId?: string; proofScreenshotPath: string }) => Promise<void>;
-  resubmitApplication: (eventId: string, id: string, patch: { payoutAccountId?: string; proofScreenshotPath: string }) => Promise<void>;
+  submitApplication: (input: { eventId: string; applicantId: string; payoutAccountId?: string; proofScreenshotPath: string; ticketPlanId?: string; quantity?: number }) => Promise<void>;
+  resubmitApplication: (eventId: string, id: string, patch: { payoutAccountId?: string; proofScreenshotPath: string; ticketPlanId?: string; quantity?: number }) => Promise<void>;
+
+  ticketPlans: Record<string, TicketPlan[]>;
+  fetchTicketPlans: (eventId: string) => Promise<void>;
 
   applications: Record<string, EventPaymentApplication[]>;
   applicationsHasMore: Record<string, boolean>;
@@ -71,6 +79,16 @@ export const useEventStore = create<EventState>((set, get) => ({
   events: [],
   myEvents: [],
   myEventsLoading: false,
+  ticketPlans: {},
+
+  fetchTicketPlans: async (eventId) => {
+    try {
+      const plans = await eventsApi.listTicketPlans(eventId);
+      set((s) => ({ ticketPlans: { ...s.ticketPlans, [eventId]: plans } }));
+    } catch (err) {
+      captureException(err);
+    }
+  },
 
   fetchMyEvents: async (userId) => {
     set({ myEventsLoading: true });
@@ -93,15 +111,22 @@ export const useEventStore = create<EventState>((set, get) => ({
   myHostApplicationsHasMore: false,
   applicationsHasMore: {},
 
-  fetchEvents: async (userId) => {
-    set({ loading: true, error: null });
-    try {
-      const { rows, hasMore } = await eventsApi.listEvents(userId, 0);
-      set({ events: rows, eventsHasMore: hasMore, loading: false });
-    } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load events' });
-    }
-  },
+  fetchEvents: (userId, opts) =>
+    swr(
+      `events:${userId}`,
+      async () => {
+        set((s) => ({ loading: s.events.length === 0, error: null }));
+        try {
+          const { rows, hasMore } = await eventsApi.listEvents(userId, 0);
+          set((s) => ({ events: reconcile(s.events, rows), eventsHasMore: hasMore, loading: false }));
+          return true;
+        } catch (err) {
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load events' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMoreEvents: async (userId) => {
     try {
@@ -121,16 +146,24 @@ export const useEventStore = create<EventState>((set, get) => ({
         type: input.type,
         category: input.category,
         starts_at: input.startsAt,
+        ends_at: input.endsAt,
         location: input.location,
         lat: input.lat,
         lng: input.lng,
         cover_url: input.coverUrl,
         max_attendees: input.maxAttendees,
+        registration_closes_before_minutes: input.registrationClosesBeforeMin,
         paid: input.paid,
         price: input.price,
         currency: input.currency,
         payout_contact_note: input.payoutContactNote,
       });
+      if (input.venue) {
+        await eventsApi.setEventVenue(event.id, input.venue);
+      }
+      if (input.ticketPlans?.length) {
+        await eventsApi.createTicketPlans(event.id, input.ticketPlans);
+      }
       if (input.payoutAccounts?.length) {
         await eventsApi.createPayoutAccounts(event.id, input.payoutAccounts);
       }
@@ -138,7 +171,7 @@ export const useEventStore = create<EventState>((set, get) => ({
       // proof-of-payment gate — see 0025_event_rsvp_host_exempt.sql).
       await eventsApi.setRsvp(event.id, input.hostId, 'going');
       const withRsvp = { ...event, rsvp: 'going' as RsvpStatus, attendeeCount: 1 };
-      set((s) => ({ events: [withRsvp, ...s.events] }));
+      set((s) => ({ events: [withRsvp, ...s.events], myEvents: [withRsvp, ...s.myEvents] }));
       return withRsvp;
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Could not create event' });
@@ -177,24 +210,27 @@ export const useEventStore = create<EventState>((set, get) => ({
         description: patch.description,
         location: patch.location,
         starts_at: patch.startsAt,
+        ends_at: patch.endsAt,
         cover_url: patch.coverUrl,
         max_attendees: patch.maxAttendees,
+        registration_closes_before_minutes: patch.registrationClosesBeforeMin,
       });
-      set((s) => ({
-        events: s.events.map((e) =>
-          e.id === id
-            ? {
-                ...e,
-                title: row.title,
-                description: row.description,
-                location: row.location,
-                startsAt: row.starts_at,
-                cover: row.cover_url ?? e.cover,
-                maxAttendees: row.max_attendees ?? undefined,
-              }
-            : e,
-        ),
-      }));
+      if (patch.venue !== undefined) await eventsApi.setEventVenue(id, patch.venue);
+      const apply = (e: GameEvent): GameEvent =>
+        e.id === id
+          ? {
+              ...e,
+              title: row.title,
+              description: row.description,
+              location: row.location,
+              startsAt: row.starts_at,
+              endsAt: row.ends_at ?? undefined,
+              cover: row.cover_url ?? e.cover,
+              maxAttendees: row.max_attendees ?? undefined,
+              registrationClosesBeforeMin: row.registration_closes_before_minutes ?? 0,
+            }
+          : e;
+      set((s) => ({ events: s.events.map(apply), myEvents: s.myEvents.map(apply) }));
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Could not update event' });
       captureException(err);
@@ -205,7 +241,10 @@ export const useEventStore = create<EventState>((set, get) => ({
   deleteEvent: async (id) => {
     try {
       await eventsApi.deleteEvent(id);
-      set((s) => ({ events: s.events.filter((e) => e.id !== id) }));
+      set((s) => ({
+        events: s.events.filter((e) => e.id !== id),
+        myEvents: s.myEvents.filter((e) => e.id !== id),
+      }));
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Could not delete event' });
       captureException(err);

@@ -2,10 +2,18 @@ import { supabase } from './client';
 import type { ChatroomInsert, ChatroomMemberRow, ChatroomMessageRow, ChatroomRow, RoomInviteRow, RoomJoinRequestRow } from './types';
 import type { ChatMessage, Chatroom, RoomInvite, RoomJoinRequest, RoomMember } from '../../types/chat';
 import { PAGE_SIZE, type Page } from './pagination';
+import { likePattern } from './searchText';
 
 type ReactionRow = { message_id: string; user_id: string; emoji: string };
 
-function roomRowToChatroom(row: ChatroomRow, membership: ChatroomMemberRow | null, lastMessage: string, lastMessageAt: string | undefined, unread: number): Chatroom {
+function roomRowToChatroom(
+  row: ChatroomRow,
+  membership: ChatroomMemberRow | null,
+  lastMessage: string,
+  lastMessageAt: string | undefined,
+  unread: number,
+  joinRequestPending = false,
+): Chatroom {
   return {
     id: row.id,
     name: row.name,
@@ -22,6 +30,7 @@ function roomRowToChatroom(row: ChatroomRow, membership: ChatroomMemberRow | nul
     lastChatAt: membership?.last_chat_at ?? undefined,
     isPrivate: row.is_private,
     requiresApproval: row.requires_approval,
+    joinRequestPending,
     pinned: membership?.pinned,
     muted: membership?.muted,
     avatar: row.avatar_url ?? undefined,
@@ -43,6 +52,8 @@ function messageRowToMessage(
     roomId: row.chatroom_id,
     senderId: row.sender_id,
     senderName,
+    senderAvatar: senderAvatarCache.get(row.sender_id)?.uri,
+    senderAvatarId: senderAvatarCache.get(row.sender_id)?.id,
     content: row.deleted ? 'This message was deleted' : row.content,
     createdAt: row.created_at,
     status: 'sent',
@@ -78,19 +89,28 @@ function groupReactions(rows: ReactionRow[], messageId: string, myUserId: string
 
 /** Every room visible to me per RLS (public rooms + private rooms I'm in), annotated with my
  * own membership row (join state, mute/pin, streak) and a best-effort last-message preview. */
-export async function listVisibleChatrooms(userId: string, offset = 0, limit = PAGE_SIZE): Promise<Page<Chatroom>> {
-  const [{ data: rooms, error: roomsErr }, { data: memberships, error: memErr }] = await Promise.all([
-    supabase
-      .from('chatrooms')
-      .select('*')
-      .order('created_at', { ascending: false })
+export async function listVisibleChatrooms(userId: string, offset = 0, limit = PAGE_SIZE, search?: string): Promise<Page<Chatroom>> {
+  // A search matches room name / tag / description server-side across ALL rooms. DMs are excluded
+  // from it: their displayed name is the other person's profile name (set below), which the stored
+  // room name doesn't reliably hold, so DMs are matched on the client instead.
+  const searchPattern = search ? likePattern(search) : null;
+  let roomsQuery = supabase.from('chatrooms').select('*');
+  if (searchPattern) roomsQuery = roomsQuery.neq('kind', 'dm').or(`name.ilike.${searchPattern},tag.ilike.${searchPattern},description.ilike.${searchPattern}`);
+  const [{ data: rooms, error: roomsErr }, { data: memberships, error: memErr }, { data: pendingRequests }] = await Promise.all([
+    roomsQuery
+      // Most-recently-active room first (WhatsApp-style), not creation order — kept in sync
+      // by a trigger (0063_chatrooms_last_message_at.sql) so a room with a brand-new message
+      // is correctly on page 1 even if it's an old room.
+      .order('last_message_at', { ascending: false })
       .range(offset, offset + limit - 1),
     supabase.from('chatroom_members').select('*').eq('user_id', userId),
+    supabase.from('room_join_requests').select('chatroom_id').eq('requester_id', userId).eq('status', 'pending'),
   ]);
   if (roomsErr) throw roomsErr;
   if (memErr) throw memErr;
 
   const membershipMap = new Map((memberships ?? []).map((m) => [m.chatroom_id, m]));
+  const pendingRoomIds = new Set((pendingRequests ?? []).map((r) => r.chatroom_id));
   const roomIds = (rooms ?? []).map((r) => r.id);
   const hasMore = roomIds.length === limit;
   if (roomIds.length === 0) return { rows: [], hasMore };
@@ -109,7 +129,7 @@ export async function listVisibleChatrooms(userId: string, offset = 0, limit = P
   const unreadByRoom = new Map<string, number>();
   for (const m of recent ?? []) {
     if (!lastByRoom.has(m.chatroom_id)) {
-      lastByRoom.set(m.chatroom_id, m.kind === 'gif' ? 'GIF' : m.kind === 'voice' ? 'Voice note' : m.content);
+      lastByRoom.set(m.chatroom_id, m.kind === 'gif' ? 'GIF' : m.kind === 'voice' ? 'Voice note' : m.kind === 'sticker' ? 'Sticker' : m.content);
       lastAtByRoom.set(m.chatroom_id, m.created_at);
     }
     // A message the viewer sent themselves was never "unread" — only someone else's message
@@ -121,7 +141,7 @@ export async function listVisibleChatrooms(userId: string, offset = 0, limit = P
   }
 
   const roomsList = (rooms ?? []).map((r) =>
-    roomRowToChatroom(r, membershipMap.get(r.id) ?? null, lastByRoom.get(r.id) ?? '', lastAtByRoom.get(r.id), unreadByRoom.get(r.id) ?? 0),
+    roomRowToChatroom(r, membershipMap.get(r.id) ?? null, lastByRoom.get(r.id) ?? '', lastAtByRoom.get(r.id), unreadByRoom.get(r.id) ?? 0, pendingRoomIds.has(r.id)),
   );
 
   // A DM room's own `name`/`avatar_url` is whichever participant created it — meaningless to
@@ -142,7 +162,8 @@ export async function listVisibleChatrooms(userId: string, offset = 0, limit = P
       const peer = peerByRoom.get(r.id);
       if (peer) {
         r.name = peer.profiles?.display_name ?? r.name;
-        r.avatar = peer.profiles?.avatar_uri ?? r.avatar;
+        r.avatar = peer.profiles?.avatar_uri ?? undefined;
+        r.avatarId = peer.profiles?.avatar_id ?? undefined;
         r.peerId = peer.user_id;
       }
     }
@@ -371,12 +392,16 @@ export async function updateMembership(
 }
 
 const senderNameCache = new Map<string, string>();
+const senderAvatarCache = new Map<string, { uri?: string; id?: string }>();
 
 async function resolveSenderNames(userIds: string[]): Promise<Map<string, string>> {
-  const missing = userIds.filter((id) => !senderNameCache.has(id));
+  const missing = userIds.filter((id) => !senderNameCache.has(id) || !senderAvatarCache.has(id));
   if (missing.length) {
-    const { data } = await supabase.from('profiles').select('id, display_name').in('id', missing);
-    for (const row of data ?? []) senderNameCache.set(row.id, row.display_name);
+    const { data } = await supabase.from('profiles').select('id, display_name, avatar_uri, avatar_id').in('id', missing);
+    for (const row of data ?? []) {
+      senderNameCache.set(row.id, row.display_name);
+      senderAvatarCache.set(row.id, { uri: row.avatar_uri ?? undefined, id: row.avatar_id ?? undefined });
+    }
   }
   return senderNameCache;
 }
@@ -414,7 +439,7 @@ export async function sendMessage(input: {
   roomId: string;
   senderId: string;
   content: string;
-  kind?: 'text' | 'gif' | 'voice' | 'image' | 'video';
+  kind?: 'text' | 'gif' | 'voice' | 'image' | 'video' | 'sticker';
   gifUri?: string;
   voiceDurationSec?: number;
   forwarded?: boolean;
@@ -481,6 +506,47 @@ export async function listMyStarredMessageIds(userId: string): Promise<Set<strin
   const { data, error } = await supabase.from('message_stars').select('message_id').eq('user_id', userId);
   if (error) throw error;
   return new Set((data ?? []).map((r) => r.message_id));
+}
+
+/** Backs the "..." menu's "Starred messages" screen — scoped to one room (not every starred
+ * message across the whole app), same as WhatsApp's per-chat starred list. Two-step lookup
+ * (message_stars has no chatroom_id column of its own) since Supabase can't filter a join by a
+ * column on the far side of it in one call here. */
+export async function listStarredMessagesForRoom(roomId: string, userId: string, myUserId: string): Promise<ChatMessage[]> {
+  const { data: starRows, error: starErr } = await supabase.from('message_stars').select('message_id').eq('user_id', userId);
+  if (starErr) throw starErr;
+  const ids = (starRows ?? []).map((r) => r.message_id);
+  if (ids.length === 0) return [];
+  const { data: rows, error } = await supabase
+    .from('chatroom_messages')
+    .select('*')
+    .eq('chatroom_id', roomId)
+    .eq('deleted', false)
+    .in('id', ids)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const messages = rows ?? [];
+  if (messages.length === 0) return [];
+  const names = await resolveSenderNames(Array.from(new Set(messages.map((m) => m.sender_id))));
+  return messages.map((row) => ({ ...messageRowToMessage(row, names.get(row.sender_id) ?? 'Someone', myUserId, []), starred: true }));
+}
+
+/** Backs the "..." menu's "Pinned messages" screen — the room's full pinned set, independent
+ * of what happens to be in the currently-scrolled-to window of the live chat thread (unlike
+ * the `pinned` banner in ChatDetailScreen, which only sees already-loaded messages). */
+export async function listPinnedMessagesForRoom(roomId: string, myUserId: string): Promise<ChatMessage[]> {
+  const { data: rows, error } = await supabase
+    .from('chatroom_messages')
+    .select('*')
+    .eq('chatroom_id', roomId)
+    .eq('pinned', true)
+    .eq('deleted', false)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const messages = rows ?? [];
+  if (messages.length === 0) return [];
+  const names = await resolveSenderNames(Array.from(new Set(messages.map((m) => m.sender_id))));
+  return messages.map((row) => ({ ...messageRowToMessage(row, names.get(row.sender_id) ?? 'Someone', myUserId, []), pinned: true }));
 }
 
 /** "Delete for me" — hides a message from this user's own view without touching the shared

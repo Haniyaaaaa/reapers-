@@ -11,4 +11,5 @@ export type Community = {
   memberCount: number;
   joined: boolean;
   location?: string;
+  tags: string[];
 };

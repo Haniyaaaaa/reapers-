@@ -38,7 +38,8 @@ export type MainStackParamList = {
   Communities: undefined;
   CommunityDetail: { id: string };
   CreateHub: undefined;
-  PostTeamRequest: undefined;
+  PostTeamRequest: { editId?: string } | undefined;
+  TeamRequestsList: undefined;
   BecomeExpert: undefined;
   MyBookings: undefined;
   MyPosts: undefined;
@@ -46,8 +47,11 @@ export type MainStackParamList = {
   MyDemos: undefined;
   Connections: undefined;
   TeamRequestApplicants: { teamRequestId: string };
+  TeamRequestDetail: { id: string };
+  MyTeamRequests: undefined;
   RoomMembers: { roomId: string };
   RoomMedia: { roomId: string };
+  RoomStarred: { roomId: string; tab?: 'starred' | 'pinned' };
   RoomInvites: undefined;
   RoomJoinRequests: { roomId: string };
   EventApplications: { eventId: string };

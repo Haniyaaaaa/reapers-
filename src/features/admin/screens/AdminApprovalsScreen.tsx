@@ -16,6 +16,8 @@ import { useAdminStore } from '../../../store/adminStore';
 import { fonts } from '../../../theme';
 import { useTheme } from '../../../theme/useTheme';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
+import { ApprovalCard } from '../components/ApprovalCard';
+import { getCyberAvatarSource } from '../../../data/cyberAvatars';
 import { PendingApprovalList } from '../components/PendingApprovalList';
 
 const SEGMENTS = ['Gamers', 'Developers', 'Experts'] as const;
@@ -134,61 +136,20 @@ export function AdminApprovalsScreen() {
             <Text style={[styles.subSectionTitle, { color: colors.text }]}>Pending Expert Applications</Text>
             {pendingExperts.length === 0 ? <Text style={[styles.emptyText, { color: colors.muted }]}>No pending expert applications.</Text> : null}
             {pendingExperts.map((exp) => (
-              <View key={exp.id} style={{ marginBottom: 12 }}>
-                <CyberCutBox
-                  cutSize={12}
-                  radius={8}
-                  fill={colors.cardFill}
-                  borderColor={colors.cardBorder}
-                  borderWidth={0.88}
-                  style={{ width: '100%' }}
-                >
-                  <View style={styles.cardInner}>
-                    <Text style={[styles.nameText, { color: colors.text }]}>{exp.role || 'Applicant'}</Text>
-                    <Text style={[styles.metaText, { color: colors.muted }]}>
-                      {exp.company}
-                    </Text>
-                    <Text style={[styles.metaText, { color: colors.muted }]}>{exp.bio}</Text>
-                    {exp.specialties.length ? <Text style={[styles.metaText, { color: colors.muted }]}>Specialties: {exp.specialties.join(', ')}</Text> : null}
-
-                    <Pressable onPress={() => nav.navigate('AdminUserDetail', { id: exp.id })} accessibilityRole="button" style={{ marginTop: 6 }}>
-                      <Text style={[styles.linkText, { color: colors.primary }]}>View user profile</Text>
-                    </Pressable>
-
-                    <View style={styles.actionsRow}>
-                      <Pressable onPress={() => approveExpert(exp.id)} style={styles.actionBtnTouch} accessibilityRole="button">
-                        <CyberCutBox gradient cutSize={6} radius={4} style={{ width: '100%', height: 38 }}>
-                          <View style={styles.btnCenter}>
-                            <Text style={styles.approveText}>Approve Expert</Text>
-                          </View>
-                        </CyberCutBox>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() => {
-                          setExpertRejectReason('');
-                          setRejectingExpertId(exp.id);
-                        }}
-                        style={styles.actionBtnTouch}
-                        accessibilityRole="button"
-                      >
-                        <CyberCutBox
-                          cutSize={6}
-                          radius={4}
-                          fill="rgba(40, 15, 25, 0.6)"
-                          borderColor="rgba(255, 77, 109, 0.6)"
-                          borderWidth={1}
-                          style={{ width: '100%', height: 38 }}
-                        >
-                          <View style={styles.btnCenter}>
-                            <Text style={styles.rejectText}>Reject</Text>
-                          </View>
-                        </CyberCutBox>
-                      </Pressable>
-                    </View>
-                  </View>
-                </CyberCutBox>
-              </View>
+              <ApprovalCard
+                key={exp.id}
+                avatar={getCyberAvatarSource(undefined)}
+                title={exp.role || 'Applicant'}
+                subtitle={exp.company || 'Expert application'}
+                badge="expert"
+                approveLabel="Verify"
+                onViewDetails={() => nav.navigate('AdminUserDetail', { id: exp.id })}
+                onApprove={() => approveExpert(exp.id)}
+                onReject={() => {
+                  setExpertRejectReason('');
+                  setRejectingExpertId(exp.id);
+                }}
+              />
             ))}
             <LoadMoreButton hasMore={pendingExpertsHasMore} onPress={loadMorePendingExperts} />
 

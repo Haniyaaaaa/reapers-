@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
+import { CutAvatar } from '../avatars/CutAvatar';
 import { getCyberAvatarSource } from '../../data/cyberAvatars';
 import { fonts, useTheme } from '../../theme';
 
@@ -43,9 +43,12 @@ export function CyberCommunityFeaturedCard({
   return (
     <Pressable onPress={onPress} style={styles.container} accessibilityRole="button">
       <CyberCutBox
-        cutSize={14}
+        cutSize={18}
         radius={6}
-        fill="rgba(14, 20, 35, 0.88)"
+        fill={isLight ? colors.cardFill : 'rgba(18, 14, 36, 0.6)'}
+        borderColor={isLight ? colors.cardBorder : 'rgba(168, 85, 247, 0.2)'}
+        borderWidth={1}
+        glass
         style={styles.cutCard}
       >
         <View style={styles.cardInner}>
@@ -103,18 +106,14 @@ export function CyberCommunityFeaturedCard({
 
           {/* Middle Row: Community Avatar + Info */}
           <View style={styles.midRow}>
-            <View style={styles.avatarCutWrap}>
-              <CyberCutBox
-                cutSize={8}
-                radius={4}
-                fill={isLight ? colors.surfaceElevated : '#161B2E'}
-                borderColor="rgba(216, 60, 255, 0.5)"
-                borderWidth={1}
-                style={styles.avatarCutBox}
-              >
-                <Image source={resolvedSource} style={styles.avatarImg} />
-              </CyberCutBox>
-            </View>
+            <CutAvatar
+              source={resolvedSource}
+              size={48}
+              cut={12}
+              borderWidth={1}
+              borderColor="rgba(216, 60, 255, 0.5)"
+              fill={isLight ? colors.surfaceElevated : '#161B2E'}
+            />
 
             <View style={styles.infoWrap}>
               <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
@@ -138,7 +137,11 @@ export function CyberCommunityFeaturedCard({
               <Text style={[styles.membersCountText, { color: colors.muted }]}>{memberCount} MEMBERS</Text>
             </View>
 
-            <Pressable onPress={onAction || onPress} style={styles.actionBtnWrap} accessibilityRole="button">
+            {/* Was backwards: an already-joined member saw "BROADCAST" while someone who
+                hadn't joined yet saw "OPEN CHAT" — a chat they couldn't actually open without
+                joining first. Not-joined now reads "JOIN" and actually joins; joined opens
+                the community's chat, same as before. */}
+            <Pressable onPress={joined ? onAction || onPress : onToggleJoin} style={styles.actionBtnWrap} accessibilityRole="button">
               <CyberCutBox cutSize={8} radius={4} style={styles.actionCutBox}>
                 <LinearGradient
                   colors={gradients.cyber}
@@ -147,7 +150,7 @@ export function CyberCommunityFeaturedCard({
                   style={styles.actionGradient}
                 >
                   <Text style={styles.actionBtnText}>
-                    {joined ? 'BROADCAST' : 'OPEN CHAT'}
+                    {joined ? 'OPEN CHAT' : 'JOIN'}
                   </Text>
                 </LinearGradient>
               </CyberCutBox>

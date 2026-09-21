@@ -1,10 +1,13 @@
-import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { openExternalUrl } from '../../utils/openUrl';
+import { EXPERT_GOLD, ExpertTick } from '../experts/ExpertBadge';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
-import { getCyberAvatarSource } from '../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../data/cyberAvatars';
 import { fonts, useTheme } from '../../theme';
 import type { Expert } from '../../types/expert';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 /** The real expert-directory list card, extracted so ExpertDirectoryScreen's curated sections
  * and the full ExpertsListScreen render identical, real cards instead of two copies of the
@@ -18,13 +21,11 @@ export function ExpertListCard({ expert, sessionCount, onPress }: { expert: Expe
       <CyberCutBox cutSize={12} radius={8} fill="rgba(14, 20, 35, 0.85)" style={styles.cut}>
         <View style={styles.inner}>
           <View style={styles.header}>
-            <View style={[styles.avatarBox, isLight && { borderColor: colors.electricAccent }]}>
-              <Image source={getCyberAvatarSource(expert.avatarId)} style={styles.avatarImg} />
-            </View>
+            <CutAvatar source={resolveAvatarSource(expert.avatar, expert.avatarId)} size={44} cut={11} borderWidth={expert.verified ? 2 : 1} borderColor={expert.verified ? EXPERT_GOLD : isLight ? colors.electricAccent : '#00F0FF'} />
             <View style={styles.headerInfo}>
               <View style={styles.nameRow}>
                 <Text style={[styles.name, { color: colors.text }]}>{expert.name}</Text>
-                {expert.verified ? <Ionicons name="checkmark-circle" size={15} color={isLight ? colors.electricAccent : "#00F0FF"} /> : null}
+                {expert.verified ? <ExpertTick size={15} /> : null}
               </View>
               <Text style={[styles.role, { color: colors.muted }]}>{expert.role}</Text>
             </View>
@@ -67,13 +68,13 @@ export function ExpertListCard({ expert, sessionCount, onPress }: { expert: Expe
             <View style={styles.cardFooterRow}>
               <View style={styles.linksWrap}>
                 {expert.linkedinUrl ? (
-                  <Pressable onPress={() => Linking.openURL(expert.linkedinUrl!)} style={styles.linkItem} accessibilityRole="button">
+                  <Pressable onPress={() => openExternalUrl(expert.linkedinUrl)} style={styles.linkItem} accessibilityRole="button">
                     <Ionicons name="logo-linkedin" size={12} color={colors.muted} />
                     <Text style={[styles.linkItemText, { color: colors.muted }]}>LinkedIn</Text>
                   </Pressable>
                 ) : null}
                 {expert.portfolioUrl ? (
-                  <Pressable onPress={() => Linking.openURL(expert.portfolioUrl!)} style={styles.linkItem} accessibilityRole="button">
+                  <Pressable onPress={() => openExternalUrl(expert.portfolioUrl)} style={styles.linkItem} accessibilityRole="button">
                     <Ionicons name="globe-outline" size={12} color={colors.muted} />
                     <Text style={[styles.linkItemText, { color: colors.muted }]} numberOfLines={1}>
                       {expert.portfolioUrl.replace(/^https?:\/\//, '')}

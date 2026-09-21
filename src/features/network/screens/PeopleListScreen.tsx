@@ -12,6 +12,9 @@ import { EmptyState } from '../../../components/feedback/EmptyState';
 import { Screen } from '../../../components/layout/Screen';
 import { ScreenHeader } from '../../../components/layout/ScreenHeader';
 import { useAuth } from '../../../hooks/useAuth';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useServerSearch } from '../../../hooks/useServerSearch';
+import { searchPeople } from '../../../services/supabase/network';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useNetworkStore } from '../../../store/networkStore';
 import { personMatchScore } from '../../../utils/matching';
@@ -50,10 +53,15 @@ export function PeopleListScreen() {
     if (user) await fetchPeople(user.id);
   });
 
+  // Search asks the server so it covers everyone discoverable, not just the 100 profiles loaded;
+  // the loaded list is filtered locally until the answer arrives.
+  const debouncedSearch = useDebouncedValue(search);
+  const peopleSearch = useServerSearch(debouncedSearch, (n) => searchPeople(user?.id ?? '', n), { enabled: !!user?.id });
+
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const base = people.filter((p) => p.id !== user?.id);
-    const matched = needle
+    const needle = peopleSearch.needle;
+    const base = (peopleSearch.results ?? people).filter((p) => p.id !== user?.id);
+    const matched = needle && peopleSearch.results === null
       ? base.filter(
           (p) =>
             p.displayName.toLowerCase().includes(needle) ||
@@ -64,7 +72,7 @@ export function PeopleListScreen() {
     return matched
       .map((person) => ({ person, score: personMatchScore(myTags, person) }))
       .sort((a, b) => b.score - a.score);
-  }, [people, search, user?.id, myTags]);
+  }, [people, peopleSearch.results, peopleSearch.needle, user?.id, myTags]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

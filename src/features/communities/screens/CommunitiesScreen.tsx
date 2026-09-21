@@ -3,7 +3,6 @@ import {
   Dimensions,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,17 +21,27 @@ import { CyberCommunityFeaturedCard } from '../../../components/cards/CyberCommu
 import { CyberCommunityWideCard } from '../../../components/cards/CyberCommunityWideCard';
 import { CyberCommunityCard } from '../../../components/cards/CyberCommunityCard';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
+import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
 import { useAuth } from '../../../hooks/useAuth';
+import { STALE_MS } from '../../../store/swr';
 import { useCommunitiesStore } from '../../../store/communitiesStore';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { MainStackParamList, TabParamList } from '../../../navigation/types';
 import type { Community } from '../../../types/community';
 import { fonts, useTheme } from '../../../theme';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
+import {
+  CommunityFilterSheet,
+  EMPTY_COMMUNITY_FILTERS,
+  communityFilterCount,
+  matchesCommunityLocation,
+  type CommunityFilters,
+} from '../components/CommunityFilterSheet';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 32, 430);
 
-const CATEGORY_CHIPS = ['ALL', 'JOINED', 'AUDIO', 'INDIE', 'ENGINES'];
+const MAX_TAG_CHIPS = 8;
 
 type Nav = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList, 'CommunitiesTab'>,
@@ -49,19 +58,32 @@ export function CommunitiesScreen() {
   const loading = useCommunitiesStore((s) => s.loading);
   const error = useCommunitiesStore((s) => s.error);
   const fetchCommunities = useCommunitiesStore((s) => s.fetchCommunities);
+  const communitiesHasMore = useCommunitiesStore((s) => s.communitiesHasMore);
+  const loadMoreCommunities = useCommunitiesStore((s) => s.loadMoreCommunities);
+  const searchResults = useCommunitiesStore((s) => s.searchResults);
+  const searchedQuery = useCommunitiesStore((s) => s.searchedQuery);
+  const searchCommunities = useCommunitiesStore((s) => s.searchCommunities);
   const joinCommunity = useCommunitiesStore((s) => s.joinCommunity);
   const leaveCommunity = useCommunitiesStore((s) => s.leaveCommunity);
 
   const [q, setQ] = useState('');
   const dq = useDebouncedValue(q);
   const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [filters, setFilters] = useState<CommunityFilters>(EMPTY_COMMUNITY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (user?.id) {
-      fetchCommunities(user.id);
+      fetchCommunities(user.id, { ifStaleMs: STALE_MS });
     }
   }, [user?.id, fetchCommunities]);
+
+  // Search asks the server (so it finds communities beyond the page already loaded). Until that
+  // answer arrives the list is filtered locally, so typing never feels laggy.
+  useEffect(() => {
+    if (user?.id) searchCommunities(user.id, dq);
+  }, [user?.id, dq, searchCommunities]);
 
   const onRefresh = useCallback(async () => {
     if (!user?.id) return;
@@ -73,40 +95,67 @@ export function CommunitiesScreen() {
     }
   }, [user?.id, fetchCommunities]);
 
-  // Derived filter matching
+  // Chips come from the tags communities actually have (most used first), not a hardcoded guess.
+  const tagChips = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of communities) for (const t of c.tags ?? []) counts.set(t.toUpperCase(), (counts.get(t.toUpperCase()) ?? 0) + 1);
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, MAX_TAG_CHIPS)
+      .map(([t]) => t);
+  }, [communities]);
+  const chips = useMemo(() => ['ALL', 'JOINED', ...tagChips], [tagChips]);
+
+  // Places communities actually list, for the filter sheet.
+  const locations = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of communities) if (c.location?.trim()) set.add(c.location.trim());
+    return Array.from(set).slice(0, 10);
+  }, [communities]);
+
+  // ONE filtered list drives every section below (featured, yours, recommended) — search, the
+  // chips and the filter sheet all apply to it. Previously only the featured card used it.
+  const needle = dq.trim().toLowerCase();
+  const serverReady = needle.length > 0 && searchedQuery === needle;
+  const searching = needle.length > 0 && !serverReady;
+
   const filtered = useMemo(() => {
-    const needle = dq.trim().toLowerCase();
-    return communities.filter((c) => {
-      // 1. Search filter
-      const matchesSearch =
-        !needle ||
-        c.shortName.toLowerCase().includes(needle) ||
-        c.name.toLowerCase().includes(needle) ||
-        c.description.toLowerCase().includes(needle);
-
-      if (!matchesSearch) return false;
-
-      // 2. Category chip filter
-      if (selectedCategory === 'ALL') return true;
-      if (selectedCategory === 'JOINED') return c.joined;
-
-      const catKeyword = selectedCategory.toLowerCase();
-      return (
-        c.name.toLowerCase().includes(catKeyword) ||
-        c.description.toLowerCase().includes(catKeyword) ||
-        c.shortName.toLowerCase().includes(catKeyword)
-      );
+    const source = serverReady ? searchResults : communities;
+    const list = source.filter((c) => {
+      if (searching && !(c.shortName.toLowerCase().includes(needle) || c.name.toLowerCase().includes(needle) || c.description.toLowerCase().includes(needle) || (c.location ?? '').toLowerCase().includes(needle))) return false;
+      if (selectedCategory === 'JOINED') {
+        if (!c.joined) return false;
+      } else if (selectedCategory !== 'ALL') {
+        if (!(c.tags ?? []).some((t) => t.toUpperCase() === selectedCategory)) return false;
+      }
+      if (filters.minMembers > 0 && c.memberCount < filters.minMembers) return false;
+      if (!matchesCommunityLocation(c.location, filters.location)) return false;
+      return true;
     });
-  }, [communities, dq, selectedCategory]);
+    if (filters.sort === 'members') return [...list].sort((a, b) => b.memberCount - a.memberCount);
+    if (filters.sort === 'name') return [...list].sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [communities, searchResults, serverReady, searching, needle, selectedCategory, filters]);
 
-  const yours = useMemo(() => communities.filter((c) => c.joined), [communities]);
-  const discover = useMemo(() => communities.filter((c) => !c.joined), [communities]);
+  const filterCount = communityFilterCount(filters);
+  const isFiltering = needle.length > 0 || selectedCategory !== 'ALL' || filterCount > 0;
+  const clearFilters = () => {
+    setQ('');
+    setSelectedCategory('ALL');
+    setFilters(EMPTY_COMMUNITY_FILTERS);
+  };
 
-  // Featured community: first from filtered or fallback to first overall
-  const featured = filtered[0] || communities[0];
+  const yours = useMemo(() => filtered.filter((c) => c.joined), [filtered]);
+  const discover = useMemo(() => filtered.filter((c) => !c.joined), [filtered]);
+  const joinedTotal = useMemo(() => communities.filter((c) => c.joined).length, [communities]);
+
+  // Featured community: the top match — no fallback to an unrelated one when nothing matches.
+  const featured = filtered[0];
 
   // Helper for generating tags from description or preset
   const getCommunityTags = (c: Community): string[] => {
+    // Real tags win; the keyword guess below only covers older communities that have none.
+    if (c.tags?.length) return c.tags.map((t) => t.toUpperCase());
     const text = `${c.name} ${c.description}`.toLowerCase();
     const tags: string[] = [];
     if (text.includes('unity')) tags.push('UNITY');
@@ -135,7 +184,7 @@ export function CommunitiesScreen() {
       </View>
 
       {onManage && (
-        <CyberSeeAllButton label="MANAGE" onPress={onManage} />
+        <CyberSeeAllButton label="Manage" onPress={onManage} />
       )}
     </View>
   );
@@ -144,7 +193,8 @@ export function CommunitiesScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CyberBackground />
 
-      <ScrollView
+      <KeyboardAwareScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           {
@@ -168,7 +218,7 @@ export function CommunitiesScreen() {
             <View style={styles.headerTitleWrap}>
               <Text style={[styles.headerTitle, { color: colors.text }]}>Communities</Text>
               <Text style={[styles.headerSubtitle, { color: colors.muted }]}>
-                {communities.length} GUILDS · {yours.length} YOU FOLLOW
+                {communities.length} GUILDS · {joinedTotal} YOU FOLLOW
               </Text>
             </View>
 
@@ -207,7 +257,7 @@ export function CommunitiesScreen() {
                   <TextInput
                     value={q}
                     onChangeText={setQ}
-                    placeholder="Search communities, demos, experts..."
+                    placeholder="Search communities..."
                     placeholderTextColor={colors.muted2}
                     style={[styles.searchInput, { color: colors.text }]}
                     returnKeyType="search"
@@ -223,10 +273,10 @@ export function CommunitiesScreen() {
 
             {/* Chamfer Filter Button */}
             <Pressable
-              onPress={() => {}}
+              onPress={() => setShowFilters(true)}
               style={styles.filterBtn}
               accessibilityRole="button"
-              accessibilityLabel="Filter communities"
+              accessibilityLabel={filterCount > 0 ? `Filter communities, ${filterCount} active` : 'Filter communities'}
             >
               <CyberCutBox cutSize={8} radius={4} style={styles.filterCutBox}>
                 <LinearGradient
@@ -238,16 +288,22 @@ export function CommunitiesScreen() {
                   <Ionicons name="options-outline" size={18} color="#FFFFFF" />
                 </LinearGradient>
               </CyberCutBox>
+              {filterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{filterCount}</Text>
+                </View>
+              ) : null}
             </Pressable>
           </View>
 
           {/* ================= 3. CATEGORY CHIPS ================= */}
-          <ScrollView
+          <KeyboardAwareScrollView
+            keyboardShouldPersistTaps="handled"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsScroll}
           >
-            {CATEGORY_CHIPS.map((chip) => {
+            {chips.map((chip) => {
               const isActive = selectedCategory === chip;
               return (
                 <Pressable
@@ -277,7 +333,61 @@ export function CommunitiesScreen() {
                 </Pressable>
               );
             })}
-          </ScrollView>
+          </KeyboardAwareScrollView>
+
+          {/* Active filters stay visible here (each removable) so a chosen city doesn't silently
+              disappear once the sheet closes. */}
+          {filterCount > 0 ? (
+            <View style={styles.activeFilterRow}>
+              {filters.location ? (
+                <Pressable
+                  onPress={() => setFilters((f) => ({ ...f, location: null }))}
+                  style={[styles.activePill, { backgroundColor: colors.cardBorder }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove location filter ${filters.location}`}
+                >
+                  <Ionicons name="location-outline" size={13} color={colors.electricAccent} />
+                  <Text style={[styles.activePillText, { color: colors.text }]}>{filters.location.toUpperCase()}</Text>
+                  <Ionicons name="close-circle" size={15} color={colors.muted} />
+                </Pressable>
+              ) : null}
+              {filters.minMembers > 0 ? (
+                <Pressable
+                  onPress={() => setFilters((f) => ({ ...f, minMembers: 0 }))}
+                  style={[styles.activePill, { backgroundColor: colors.cardBorder }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${filters.minMembers}+ members filter`}
+                >
+                  <Text style={[styles.activePillText, { color: colors.text }]}>{filters.minMembers}+ MEMBERS</Text>
+                  <Ionicons name="close-circle" size={15} color={colors.muted} />
+                </Pressable>
+              ) : null}
+              {filters.sort !== 'default' ? (
+                <Pressable
+                  onPress={() => setFilters((f) => ({ ...f, sort: 'default' }))}
+                  style={[styles.activePill, { backgroundColor: colors.cardBorder }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove sort"
+                >
+                  <Text style={[styles.activePillText, { color: colors.text }]}>{filters.sort === 'members' ? 'MOST MEMBERS' : 'A–Z'}</Text>
+                  <Ionicons name="close-circle" size={15} color={colors.muted} />
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
+          {searching ? <Text style={[styles.searchingText, { color: colors.muted }]}>Searching all communities…</Text> : null}
+
+          {/* No matches at all */}
+          {!featured && isFiltering ? (
+            <CyberCutBox cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.emptyCard}>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>No communities match</Text>
+              <Text style={[styles.emptySubtitle, { color: colors.muted }]}>Try a different search, tag or filter.</Text>
+              <Pressable onPress={clearFilters} style={styles.clearBtn} accessibilityRole="button">
+                <Text style={[styles.clearBtnText, { color: colors.electricAccent }]}>Clear all filters</Text>
+              </Pressable>
+            </CyberCutBox>
+          ) : null}
 
           {/* ================= 4. FEATURED THIS WEEK ================= */}
           {featured && (
@@ -335,17 +445,20 @@ export function CommunitiesScreen() {
               borderWidth={1}
               style={styles.emptyCard}
             >
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>You haven't joined any communities yet</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {isFiltering && joinedTotal > 0 ? 'None of your communities match' : "You haven't joined any communities yet"}
+              </Text>
               <Text style={[styles.emptySubtitle, { color: colors.muted }]}>
-                Discover indie studios, tech guilds, and engine circles below.
+                {isFiltering && joinedTotal > 0 ? 'Try a different search, tag or filter.' : 'Discover indie studios, tech guilds, and engine circles below.'}
               </Text>
             </CyberCutBox>
           )}
 
           {/* ================= 6. RECOMMENDED FOR YOU ================= */}
-          {renderSectionHeader('Recommended For You', () => {})}
-          {discover.length > 0 ? (
-            <ScrollView
+          {selectedCategory !== 'JOINED' ? renderSectionHeader('Recommended For You', () => {}) : null}
+          {selectedCategory === 'JOINED' ? null : discover.length > 0 ? (
+            <KeyboardAwareScrollView
+              keyboardShouldPersistTaps="handled"
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScrollRow}
@@ -370,7 +483,7 @@ export function CommunitiesScreen() {
                   onPress={() => nav.navigate('CommunityDetail', { id: c.id })}
                 />
               ))}
-            </ScrollView>
+            </KeyboardAwareScrollView>
           ) : (
             <CyberCutBox
               cutSize={10}
@@ -380,12 +493,19 @@ export function CommunitiesScreen() {
               borderWidth={1}
               style={styles.emptyCard}
             >
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>All communities joined!</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {isFiltering ? 'No communities to discover match' : 'All communities joined!'}
+              </Text>
               <Text style={[styles.emptySubtitle, { color: colors.muted }]}>
-                You're following all public circles in the network.
+                {isFiltering ? 'Try a different search, tag or filter.' : "You're following all public circles in the network."}
               </Text>
             </CyberCutBox>
           )}
+
+          {/* More pages — only when browsing, not while a search is answering from the server */}
+          {needle.length === 0 ? (
+            <LoadMoreButton hasMore={communitiesHasMore} onPress={() => (user ? loadMoreCommunities(user.id) : undefined)} />
+          ) : null}
 
           {/* ================= 7. FASTEST GROWING / TRENDING ================= */}
           <View style={styles.trendingHeaderWrap}>
@@ -405,12 +525,23 @@ export function CommunitiesScreen() {
             </Text>
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
+
+      <CommunityFilterSheet
+        visible={showFilters}
+        filters={filters}
+        locations={locations}
+        onClose={() => setShowFilters(false)}
+        onApply={setFilters}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  activeFilterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  activePill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 30, borderRadius: 15 },
+  activePillText: { fontFamily: fonts.mono, fontSize: 10.5, fontWeight: '700', letterSpacing: 0.5 },
   container: {
     flex: 1,
     backgroundColor: '#090F1C',
@@ -469,7 +600,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 16,
     width: '100%',
   },
   searchFieldWrap: {
@@ -498,6 +629,22 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
   },
+  filterBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#FF4D6D',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: { fontFamily: fonts.monoBold, fontSize: 9, color: '#FFFFFF' },
+  searchingText: { fontFamily: fonts.mono, fontSize: 10.5, letterSpacing: 0.5, marginBottom: 10 },
+  clearBtn: { marginTop: 10, minHeight: 32, justifyContent: 'center' },
+  clearBtnText: { fontFamily: fonts.bodySemi, fontSize: 13 },
   filterCutBox: {
     width: 42,
     height: 42,
@@ -512,7 +659,7 @@ const styles = StyleSheet.create({
   chipsScroll: {
     gap: 8,
     paddingBottom: 4,
-    marginBottom: 18,
+    marginBottom: 20,
   },
   chipPressable: {
     height: 32,
@@ -539,8 +686,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginTop: 6,
-    marginBottom: 12,
+    marginTop: 24,
+    marginBottom: 14,
     width: '100%',
   },
   sectionTitleBlock: {
@@ -576,7 +723,7 @@ const styles = StyleSheet.create({
   },
   horizontalScrollRow: {
     paddingRight: 12,
-    marginBottom: 14,
+    marginBottom: 8,
   },
   emptyCard: {
     width: '100%',

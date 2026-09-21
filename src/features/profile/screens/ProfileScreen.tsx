@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Image,
+  ActivityIndicator,
   Linking,
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -15,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { useRefreshControl } from '../../../hooks/useRefreshControl';
+import { goBackOrHome } from '../../../navigation/goBackOrHome';
 import type { MainStackParamList } from '../../../navigation/types';
 import { ConnectButton } from '../../../components/buttons/ConnectButton';
 import { ChipPicker } from '../../../components/inputs/ChipPicker';
@@ -24,7 +25,7 @@ import { DemoCard } from '../../../components/cards/DemoCard';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { skillOptions } from '../../../data/mock';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useAuthStore } from '../../../store/authStore';
 import { useNetworkStore } from '../../../store/networkStore';
@@ -37,6 +38,10 @@ import { useCommunitiesStore } from '../../../store/communitiesStore';
 import { getProfile, profileRowToUser } from '../../../services/supabase/profiles';
 import { fonts, useTheme } from '../../../theme';
 import type { Role, User } from '../../../types/user';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
+import { VerifiedSeal } from '../../../components/experts/ExpertBadge';
+import { STALE_MS } from '../../../store/swr';
 
 const INTEREST_OPTIONS = ['ROGUELITES', 'IMMERSIVE SIMS', 'CO-OP DESIGN', 'SIM SYSTEMS', 'HORROR', 'RPG', 'STRATEGY'];
 
@@ -112,6 +117,15 @@ export function ProfileScreen() {
   );
   const [interests, setInterests] = useState(profile?.interests ?? []);
   const [saveMsg, setSaveMsg] = useState('');
+  const [saveErr, setSaveErr] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // The "Saved" confirmation is transient — it shouldn't sit on the page forever.
+  useEffect(() => {
+    if (!saveMsg) return;
+    const t = setTimeout(() => setSaveMsg(''), 2500);
+    return () => clearTimeout(t);
+  }, [saveMsg]);
 
   const portfolioOwnerId = isOwn ? user?.id : params?.id;
 
@@ -119,33 +133,37 @@ export function ProfileScreen() {
     if (portfolioOwnerId) fetchDemosByDeveloper(portfolioOwnerId);
   }, [portfolioOwnerId, fetchDemosByDeveloper]);
 
-  useEffect(() => {
-    if (isOwn && user) fetchMySubscription(user.id);
-  }, [isOwn, user, fetchMySubscription]);
+  // Effects key on the stable user id: `refreshUser` used to hand back a fresh-but-equal `user`
+  // object, which re-fired every one of these (and the focus effect that calls it) in a loop.
+  const userId = user?.id;
 
   useEffect(() => {
-    if (isOwn && user) fetchCommunities(user.id);
-  }, [isOwn, user, fetchCommunities]);
+    if (isOwn && userId) fetchMySubscription(userId);
+  }, [isOwn, userId, fetchMySubscription]);
 
   useEffect(() => {
-    if (isOwn && user) fetchMyApplication(user.id);
-  }, [isOwn, user, fetchMyApplication]);
+    if (isOwn && userId) fetchCommunities(userId, { ifStaleMs: STALE_MS });
+  }, [isOwn, userId, fetchCommunities]);
+
+  useEffect(() => {
+    if (isOwn && userId) fetchMyApplication(userId);
+  }, [isOwn, userId, fetchMyApplication]);
 
   useFocusEffect(
     useCallback(() => {
-      if (isOwn && user) {
-        refreshUser();
-        fetchMyApplication(user.id);
+      if (isOwn && userId) {
+        refreshUser({ ifStaleMs: 60_000 });
+        fetchMyApplication(userId);
       }
-    }, [isOwn, user, refreshUser, fetchMyApplication]),
+    }, [isOwn, userId, refreshUser, fetchMyApplication]),
   );
 
   useEffect(() => {
-    if (!isOwn && user) {
-      fetchPeople(user.id);
-      fetchBlocked(user.id);
+    if (!isOwn && userId) {
+      fetchPeople(userId, { ifStaleMs: 10_000 });
+      fetchBlocked(userId);
     }
-  }, [isOwn, user, fetchPeople, fetchBlocked]);
+  }, [isOwn, userId, fetchPeople, fetchBlocked]);
 
   // Re-fetch on every focus, not just first mount — the other person's connection response
   // (accepting/declining a request you sent) happens on their own device and this screen has
@@ -154,8 +172,8 @@ export function ProfileScreen() {
   // of this screen instead of getting a fresh mount.
   useFocusEffect(
     useCallback(() => {
-      if (!isOwn && user) fetchPeople(user.id);
-    }, [isOwn, user, fetchPeople]),
+      if (!isOwn && userId) fetchPeople(userId, { ifStaleMs: 10_000 });
+    }, [isOwn, userId, fetchPeople]),
   );
 
   const portfolio = useMemo(
@@ -163,10 +181,22 @@ export function ProfileScreen() {
     [demos, portfolioOwnerId],
   );
 
+  const refreshControl = useRefreshControl(async () => {
+    if (isOwn) {
+      if (!user) return;
+      await Promise.all([refreshUser(), fetchDemosByDeveloper(user.id), fetchCommunities(user.id)]);
+    } else if (params?.id) {
+      const row = await getProfile(params.id);
+      setOther(profileRowToUser(row, ''));
+      await fetchDemosByDeveloper(params.id);
+    }
+  });
+
   const nameOk = displayName.trim().length >= 2;
   const userOk = username.trim().length >= 3;
 
   const save = async () => {
+    if (saving) return;
     if (!nameOk) {
       setNameErr('Name needs 2+ characters');
       return;
@@ -176,25 +206,35 @@ export function ProfileScreen() {
       return;
     }
     const parsedYears = yearsExperience.trim() ? Number(yearsExperience.trim()) : undefined;
-    await completeOnboarding({
-      displayName: displayName.trim(),
-      username: username.trim(),
-      bio,
-      roles,
-      skills,
-      tags: skills,
-      avatarUri: avatar,
-      avatarId: avatar ? undefined : avatarId,
-      avatarLook: avatar ? undefined : avatarLook,
-      portfolioUrl,
-      linkedinUrl,
-      location: location.trim(),
-      yearsExperience: Number.isFinite(parsedYears) ? parsedYears : undefined,
-      interests,
-    });
-    setEditing(false);
-    setDirty(false);
-    setSaveMsg('Saved');
+    setSaving(true);
+    setSaveErr('');
+    setSaveMsg('');
+    try {
+      await completeOnboarding({
+        displayName: displayName.trim(),
+        username: username.trim(),
+        bio,
+        roles,
+        skills,
+        tags: skills,
+        avatarUri: avatar ?? '',
+        avatarId: avatar ? undefined : avatarId,
+        avatarLook: avatar ? undefined : avatarLook,
+        portfolioUrl,
+        linkedinUrl,
+        location: location.trim(),
+        yearsExperience: Number.isFinite(parsedYears) ? parsedYears : undefined,
+        interests,
+      });
+      setEditing(false);
+      setDirty(false);
+      setSaveMsg('Saved ✓');
+    } catch (e) {
+      // Stay in edit mode with everything the user typed intact, and say what went wrong.
+      setSaveErr(e instanceof Error && e.message ? e.message : 'Could not save your profile — try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleShare = async () => {
@@ -229,7 +269,7 @@ export function ProfileScreen() {
         <CyberBackground showArtwork={false} />
         <View style={[styles.innerContent, { paddingTop: insets.top + 40, alignItems: 'center' }]}>
           <Text style={[styles.notFoundText, { color: colors.text }]}>This profile could not be found.</Text>
-          <Pressable onPress={() => nav.goBack()} style={{ marginTop: 16 }}>
+          <Pressable onPress={() => goBackOrHome(nav)} style={{ marginTop: 16 }}>
             <Text style={{ color: colors.primary, fontFamily: fonts.bodySemi }}>Go Back</Text>
           </Pressable>
         </View>
@@ -243,7 +283,7 @@ export function ProfileScreen() {
 
       {/* Top Header Bar */}
       <View style={[styles.headerBar, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => nav.goBack()} style={styles.headerBtn} accessibilityRole="button">
+        <Pressable onPress={() => goBackOrHome(nav)} style={styles.headerBtn} accessibilityRole="button">
           <CyberCutBox
             cutSize={8}
             radius={4}
@@ -276,44 +316,59 @@ export function ProfileScreen() {
         )}
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
       >
-        {dirty ? <Text style={styles.unsavedText}>Unsaved changes</Text> : null}
+        {saving ? <Text style={styles.savingText}>Saving your changes…</Text> : null}
+        {!saving && dirty ? <Text style={styles.unsavedText}>Unsaved changes</Text> : null}
         {saveMsg ? <Text style={styles.saveMsgText}>{saveMsg}</Text> : null}
+        {saveErr ? <Text style={styles.saveErrText}>{saveErr}</Text> : null}
 
         {/* 1. USER IDENTITY HEADER */}
         <View style={styles.identitySection}>
           <View style={styles.avatarWrap}>
-            <CyberCutBox
-              cutSize={14}
-              radius={50}
+            <CutAvatar
+              source={resolveAvatarSource(profile?.avatarUri, profile?.avatarId || 'male_1')}
+              size={90}
+              cut={22}
               fill="#161B2E"
-              borderColor="rgba(216, 60, 255, 0.6)"
-              borderWidth={2}
-              style={styles.avatarCutBox}
-            >
-              <Image
-                source={
-                  profile?.avatarUri
-                    ? { uri: profile.avatarUri }
-                    : getCyberAvatarSource(profile?.avatarId || 'male_1')
-                }
-                style={styles.avatarImg}
-              />
-            </CyberCutBox>
+              borderColor={isExpert ? '#F5C542' : 'rgba(216, 60, 255, 0.6)'}
+              borderWidth={isExpert ? 3 : 2}
+            />
           </View>
 
-          <Text style={[styles.displayNameText, { color: colors.text }]}>{shownName}</Text>
+          <Text style={[styles.displayNameText, { color: colors.text }, isExpert && { marginBottom: 8 }]}>{shownName}</Text>
+          {isExpert ? (
+            <View style={styles.expertBadgeWrap} accessibilityLabel="Verified expert">
+              <CyberCutBox
+                gradient
+                gradientColors={['#FFE27A', '#F5B301', '#B8860B']}
+                cutSize={7}
+                radius={4}
+                style={styles.expertBadgeCut}
+              >
+                <View style={styles.expertBadgeInner}>
+                  <VerifiedSeal size={17} tone="ink" />
+                  <Text style={styles.expertBadgeText}>VERIFIED EXPERT</Text>
+                </View>
+              </CyberCutBox>
+            </View>
+          ) : null}
 
           {/* Action Buttons Row */}
           <View style={styles.actionRow}>
             {isOwn ? (
-              <Pressable onPress={() => setEditing((prev) => !prev)} style={styles.editBtnTouch} accessibilityRole="button">
+              <Pressable onPress={() => {
+                  if (saving) return;
+                  if (!editing) setEditing(true);
+                  else if (dirty) save();
+                  else setEditing(false);
+                }} disabled={saving} style={[styles.editBtnTouch, saving && { opacity: 0.7 }]} accessibilityRole="button" accessibilityState={{ busy: saving }}>
                 <CyberCutBox gradient cutSize={8} radius={4} style={styles.actionBtnCut}>
                   <View style={styles.actionBtnInner}>
-                    <Text style={styles.actionBtnText}>{editing ? 'Done' : 'Edit profile'}</Text>
+                    {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.actionBtnText}>{editing ? 'Done' : 'Edit profile'}</Text>}
                   </View>
                 </CyberCutBox>
               </Pressable>
@@ -394,7 +449,7 @@ export function ProfileScreen() {
             <View style={styles.aboutCardInner}>
               <Text style={[styles.bioText, { color: colors.text }]}>
                 {profile?.bio ||
-                  'Systems-first gameplay engineer. Shipped two indie titles, currently prototyping a tactical roguelite with deterministic netcode.'}
+                  (isOwn ? 'Tap Edit profile to add a short bio.' : 'No bio yet.')}
               </Text>
 
               {/* Skill Tags */}
@@ -496,7 +551,7 @@ export function ProfileScreen() {
               label="Location"
               value={location}
               onChangeText={(v) => { setLocation(v); setDirty(true); }}
-              placeholder="Berlin, DE · UTC+1"
+              placeholder="Lahore, PK · UTC+5"
             />
             <AuthTextField
               label="Years of experience"
@@ -537,10 +592,11 @@ export function ProfileScreen() {
               }}
             />
 
-            <Pressable onPress={save} disabled={!nameOk || !userOk} style={{ marginTop: 14 }}>
+            <Pressable onPress={save} disabled={!nameOk || !userOk || saving} style={{ marginTop: 14, opacity: !nameOk || !userOk || saving ? 0.7 : 1 }} accessibilityRole="button" accessibilityState={{ busy: saving }}>
               <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: 46 }}>
-                <View style={styles.actionBtnInner}>
-                  <Text style={styles.actionBtnText}>Save profile</Text>
+                <View style={[styles.actionBtnInner, saving && { flexDirection: 'row', gap: 8 }]}>
+                  {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+                  <Text style={styles.actionBtnText}>{saving ? 'Saving…' : 'Save profile'}</Text>
                 </View>
               </CyberCutBox>
             </Pressable>
@@ -610,6 +666,11 @@ export function ProfileScreen() {
             <Pressable onPress={() => nav.navigate('Tabs', { screen: 'CommunitiesTab' })} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
               <Ionicons name="people-outline" size={17} color={colors.primary} />
               <Text style={[styles.linkText, { color: colors.primary }]}>My Communities</Text>
+            </Pressable>
+
+            <Pressable onPress={() => nav.navigate('MyTeamRequests')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
+              <Ionicons name="people-circle-outline" size={17} color={colors.primary} />
+              <Text style={[styles.linkText, { color: colors.primary }]}>My Team Requests</Text>
             </Pressable>
 
             <Pressable onPress={() => nav.navigate('MyEvents')} style={[styles.linkRow, { backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
@@ -688,7 +749,7 @@ export function ProfileScreen() {
             </CyberCutBox>
           </Pressable>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
@@ -740,6 +801,16 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodySemi,
     marginBottom: 8,
   },
+  savingText: {
+    color: '#00E5FF',
+    fontFamily: fonts.bodySemi,
+    marginBottom: 8,
+  },
+  saveErrText: {
+    color: '#FF4D6D',
+    fontFamily: fonts.bodySemi,
+    marginBottom: 8,
+  },
   saveMsgText: {
     color: '#3DDC84',
     fontFamily: fonts.bodySemi,
@@ -764,6 +835,30 @@ const styles = StyleSheet.create({
   avatarImg: {
     width: '100%',
     height: '100%',
+  },
+  expertBadgeWrap: {
+    marginBottom: 16,
+    shadowColor: '#F5B301',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  expertBadgeCut: {
+    height: 28,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  expertBadgeInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  expertBadgeText: {
+    fontFamily: fonts.monoBold,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: '#3A2600',
   },
   displayNameText: {
     fontFamily: fonts.display,

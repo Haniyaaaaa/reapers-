@@ -50,7 +50,14 @@ export function SetNewPasswordScreen() {
     <Screen footerPad={false}>
       <ScreenHeader title="Set new password" onBack={() => cancelPasswordRecovery()} />
       <Text style={[styles.body, { color: colors.muted }]}>
-        Code verified for <Text style={[styles.bold, { color: colors.text }]}>{params.email}</Text>. Choose a new
+        {params?.email ? (
+          <>
+            Code verified for <Text style={[styles.bold, { color: colors.text }]}>{params.email}</Text>.
+          </>
+        ) : (
+          'Code verified.'
+        )}{' '}
+        Choose a new
         password below.
       </Text>
       <View style={{ height: space.lg }} />

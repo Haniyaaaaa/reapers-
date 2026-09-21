@@ -12,7 +12,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
+import { BlurView } from 'expo-blur';
+import Svg, { Defs, LinearGradient as SvgGradient, Path, Stop } from 'react-native-svg';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import { fonts, useTheme } from '../../theme';
@@ -83,12 +84,17 @@ const DEFAULT_TAB_MAP: Record<
   },
 };
 
-const CUBE_SIZE = 46;
+const CUBE_SIZE = 50;
+const CRADLE_SIZE = 76;
+const CRADLE_DIAG = Math.ceil(CRADLE_SIZE * Math.SQRT2);
+const CRADLE_CENTER_Y = -14; // cradle center relative to the bar's top edge
+const CRADLE_CLIP_H = 56;
 const CUBE_HALF = CUBE_SIZE / 2;
+const BAR_PAD_X = 12; // inner left/right padding of the tab row
 
 export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const [barWidth, setBarWidth] = useState(Dimensions.get('window').width - 24);
+  const [barWidth, setBarWidth] = useState(Dimensions.get('window').width - 20);
 
   // Dynamically configure tabs based on navigation state routes
   const tabConfigs: TabConfig[] = state.routes.map((route) => {
@@ -144,7 +150,7 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
   };
 
   const count = tabConfigs.length || 1;
-  const tabWidth = barWidth / count;
+  const tabWidth = (barWidth - BAR_PAD_X * 2) / count;
 
   // Build rolling interpolation arrays
   const indexInputRange: number[] = [];
@@ -158,7 +164,7 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
 
   for (let i = 0; i < count; i++) {
     indexInputRange.push(i);
-    translateXOutput.push(i * tabWidth + tabWidth / 2 - CUBE_HALF);
+    translateXOutput.push(BAR_PAD_X + i * tabWidth + tabWidth / 2 - CUBE_HALF);
     const deg = (i - Math.floor(count / 2)) * 180;
     rotateDegOutput.push(`${deg}deg`);
     iconCounterRotateOutput.push(`${-deg}deg`);
@@ -226,20 +232,44 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
     }
   };
 
-  // SVG Chamfer-cut bar outline
-  const cut = 14;
+  // SVG Chamfer-cut bar outline — top-left + bottom-right cuts, same shape as the cards
+  const cut = 20;
+  const rad = 6;
   const barHeight = 64;
   const barPath = `
     M ${cut} 0
-    H ${barWidth - cut}
-    L ${barWidth} ${cut}
-    V ${barHeight}
-    H 0
+    H ${barWidth - rad}
+    Q ${barWidth} 0 ${barWidth} ${rad}
+    V ${barHeight - cut}
+    L ${barWidth - cut} ${barHeight}
+    H ${rad}
+    Q 0 ${barHeight} 0 ${barHeight - rad}
     V ${cut}
     Z
   `;
+  const barBorder = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(150, 180, 230, 0.28)';
+
+  const scrimHeight = 64 + Math.max(insets.bottom, 12) + 64;
+  const scrimColor = isLight ? '255, 255, 255' : '9, 15, 28';
 
   return (
+    <>
+    {/* Soft progressive blur + scrim under the bar so scrolled content doesn't clutter it */}
+    <View pointerEvents="none" style={[styles.scrim, { height: scrimHeight }]}>
+      {[[0.9, 8], [0.66, 18], [0.42, 32]].map(([h, intensity]) => (
+        <BlurView
+          key={intensity}
+          intensity={intensity}
+          tint={isLight ? 'light' : 'dark'}
+          style={[styles.scrimBlur, { height: scrimHeight * h }]}
+        />
+      ))}
+      <LinearGradient
+        colors={[`rgba(${scrimColor}, 0)`, `rgba(${scrimColor}, 0.55)`, `rgba(${scrimColor}, 0.92)`]}
+        locations={[0, 0.55, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
     <View
       style={[
         styles.outerWrap,
@@ -254,13 +284,37 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
           height={barHeight}
           style={StyleSheet.absoluteFill}
         >
+          <Defs>
+            {/* Figma: linear-gradient(92.37deg, rgba(42,70,130,.58) 0.29%, rgba(9,15,28,.58) 110.52%) */}
+            <SvgGradient id="barFill" x1="0" y1="0.5" x2="1" y2="0.54">
+              <Stop offset="0" stopColor="#2A4682" stopOpacity={0.58} />
+              <Stop offset="1" stopColor="#0C1426" stopOpacity={0.58} />
+            </SvgGradient>
+          </Defs>
           <Path
             d={barPath}
-            fill={isLight ? 'rgba(255, 255, 255, 0.95)' : 'rgba(9, 15, 28, 0.94)'}
-            stroke={isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(0, 229, 255, 0.45)'}
+            fill={isLight ? 'rgba(255, 255, 255, 0.95)' : 'url(#barFill)'}
+            stroke={barBorder}
             strokeWidth={1}
           />
         </Svg>
+
+        {/* V-notch cut into the bar's top edge under the diamond: the dark rotated square is
+            clipped at the bar's top so only the part dipping into the bar shows. */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.notchClip,
+            { transform: [{ translateX }], marginLeft: CUBE_HALF - CRADLE_DIAG / 2 },
+          ]}
+        >
+          <View
+            style={[
+              styles.cradle,
+              { borderColor: barBorder, backgroundColor: isLight ? '#F1F5F9' : '#0A101E' },
+            ]}
+          />
+        </Animated.View>
 
         {/* Dynamic Rolling Cubic Wheel */}
         <Animated.View
@@ -328,8 +382,8 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
                   {!isFocused ? (
                     <Ionicons
                       name={config.icon}
-                      size={20}
-                      color={colors.muted}
+                      size={21}
+                      color={isLight ? colors.muted : '#B4C0D6'}
                     />
                   ) : (
                     <View style={styles.emptySpacer} />
@@ -342,11 +396,13 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
                     styles.tabLabel,
                     isFocused
                       ? [styles.tabLabelActive, isLight && styles.tabLabelActiveLight]
-                      : [styles.tabLabelInactive, { color: colors.muted }],
+                      : [styles.tabLabelInactive, { color: isLight ? colors.muted : '#B4C0D6' }],
                   ]}
                   numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
                 >
-                  {config.label}
+                  {isFocused ? '' : config.label}
                 </Text>
               </Pressable>
             );
@@ -354,14 +410,28 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
         </View>
       </View>
     </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  scrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflow: 'hidden',
+  },
+  scrimBlur: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   outerWrap: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 10,
+    right: 10,
     bottom: 0,
     alignItems: 'center',
   },
@@ -381,6 +451,7 @@ const styles = StyleSheet.create({
   tabsRow: {
     flexDirection: 'row',
     width: '100%',
+    paddingHorizontal: BAR_PAD_X,
     height: '100%',
     alignItems: 'center',
   },
@@ -403,10 +474,12 @@ const styles = StyleSheet.create({
     height: 22,
   },
   tabLabel: {
-    fontFamily: fonts.bodySemi,
-    fontSize: 9,
-    letterSpacing: 0.8,
+    fontFamily: fonts.body,
+    fontSize: 10.5,
+    letterSpacing: 0.2,
     textAlign: 'center',
+    alignSelf: 'stretch',
+    paddingHorizontal: 2,
   },
   tabLabelInactive: {
     color: '#64748B',
@@ -423,9 +496,27 @@ const styles = StyleSheet.create({
     textShadowColor: 'transparent',
     textShadowRadius: 0,
   },
+  notchClip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: CRADLE_DIAG,
+    height: CRADLE_CLIP_H,
+    overflow: 'hidden',
+  },
+  cradle: {
+    position: 'absolute',
+    width: CRADLE_SIZE,
+    height: CRADLE_SIZE,
+    left: (CRADLE_DIAG - CRADLE_SIZE) / 2,
+    top: CRADLE_CENTER_Y - CRADLE_SIZE / 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    transform: [{ rotate: '45deg' }],
+  },
   cubicWheelWrap: {
     position: 'absolute',
-    top: -20,
+    top: -40,
     left: 0,
     width: CUBE_SIZE,
     height: CUBE_SIZE,
@@ -436,17 +527,17 @@ const styles = StyleSheet.create({
   cubicGlowShadow: {
     width: CUBE_SIZE,
     height: CUBE_SIZE,
-    borderRadius: 8,
+    borderRadius: 12,
     shadowColor: '#6D35FF',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.95,
-    shadowRadius: 14,
-    elevation: 12,
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
   cubeGradient: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 12,
   },
   gyroIconWrap: {
     position: 'absolute',

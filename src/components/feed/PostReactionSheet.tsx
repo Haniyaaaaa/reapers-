@@ -22,6 +22,7 @@ export function PostReactionSheet({ visible, onReact, onClose }: { visible: bool
                 onReact(e);
                 onClose();
               }}
+              onClose={onClose}
             />
           </View>
         </Pressable>

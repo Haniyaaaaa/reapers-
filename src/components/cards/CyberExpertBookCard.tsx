@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
@@ -8,8 +7,10 @@ import {
   View,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { EXPERT_GOLD, ExpertTick } from '../experts/ExpertBadge';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 const DEFAULT_EXPERT_AVATAR = require('../../../assets/avatars/extracted/female_6.jpg');
 
@@ -21,6 +22,7 @@ interface CyberExpertBookCardProps {
   reviewsCount: number;
   availableSlot: string;
   avatarSource?: ImageSourcePropType;
+  verified?: boolean;
   avatarUri?: string;
   booked?: boolean;
   onPress?: () => void;
@@ -34,6 +36,7 @@ export function CyberExpertBookCard({
   reviewsCount,
   availableSlot,
   avatarSource,
+  verified = false,
   avatarUri,
   booked = false,
   onPress,
@@ -56,22 +59,23 @@ export function CyberExpertBookCard({
       >
         <View style={styles.cardInner}>
           {/* Chamfer Cut Avatar Container */}
-          <CyberCutBox
-            cutSize={8}
-            radius={4}
+          <CutAvatar
+            source={resolvedSource}
+            size={52}
+            cut={13}
             fill={isLight ? 'rgba(168, 85, 247, 0.12)' : 'rgba(168, 85, 247, 0.2)'}
-            borderColor={isLight ? 'rgba(168, 85, 247, 0.3)' : 'rgba(192, 132, 252, 0.35)'}
-            borderWidth={1}
-            style={styles.avatarBox}
-          >
-            <Image source={resolvedSource} style={styles.avatarImg} />
-          </CyberCutBox>
+            borderColor={verified ? EXPERT_GOLD : isLight ? 'rgba(168, 85, 247, 0.3)' : 'rgba(192, 132, 252, 0.35)'}
+            borderWidth={verified ? 2 : 1}
+          />
 
           {/* Expert Info Details */}
           <View style={styles.expertInfo}>
-            <Text style={[styles.nameText, { color: colors.text }]} numberOfLines={1}>
-              {name}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Text style={[styles.nameText, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>
+                {name}
+              </Text>
+              {verified ? <ExpertTick size={15} /> : null}
+            </View>
             <Text style={[styles.titleText, { color: colors.muted }]} numberOfLines={1}>
               {title}
             </Text>
@@ -79,11 +83,11 @@ export function CyberExpertBookCard({
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={13} color="#FF9500" />
               <Text style={[styles.ratingNum, { color: colors.text }]}>
-                {rating > 0 ? rating.toFixed(1) : '5.0'}
+                {rating > 0 ? rating.toFixed(1) : '—'}
               </Text>
               <Text style={[styles.dot, { color: colors.muted2 }]}>·</Text>
               <Text style={[styles.reviewsText, { color: colors.muted }]}>
-                {reviewsCount} REVIEWS
+                {reviewsCount} {reviewsCount === 1 ? 'REVIEW' : 'REVIEWS'}
               </Text>
             </View>
           </View>

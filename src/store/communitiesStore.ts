@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { reconcile, swr, type FetchOpts } from './swr';
 import * as communitiesApi from '../services/supabase/communities';
 import * as chatApi from '../services/supabase/chat';
 import { deleteObjectByPublicUrl } from '../services/supabase/storage';
@@ -10,30 +11,56 @@ type CommunitiesState = {
   communitiesHasMore: boolean;
   loading: boolean;
   error: string | null;
-  fetchCommunities: (userId: string) => Promise<void>;
+  fetchCommunities: (userId: string, opts?: FetchOpts) => Promise<void>;
   loadMoreCommunities: (userId: string) => Promise<void>;
+  /** Server-side search results for the Communities screen — kept apart from `communities` so a
+   * search never replaces the list other screens (Home) show. */
+  searchResults: Community[];
+  /** The query `searchResults` answers; the screen falls back to local filtering until it matches. */
+  searchedQuery: string;
+  searchCommunities: (userId: string, query: string) => Promise<void>;
   joinCommunity: (userId: string, communityId: string) => Promise<void>;
   leaveCommunity: (userId: string, communityId: string) => Promise<void>;
-  createCommunity: (input: { createdBy: string; shortName: string; name: string; description: string; location?: string; logoUrl?: string }) => Promise<Community>;
-  updateCommunity: (id: string, patch: { name?: string; description?: string; location?: string; logoUrl?: string }) => Promise<void>;
+  createCommunity: (input: { createdBy: string; shortName: string; name: string; description: string; location?: string; logoUrl?: string; tags?: string[] }) => Promise<Community>;
+  updateCommunity: (id: string, patch: { name?: string; description?: string; location?: string; logoUrl?: string; tags?: string[] }) => Promise<void>;
   deleteCommunity: (id: string) => Promise<void>;
 };
+
+let searchSeq = 0;
+
+const findCommunity = (s: CommunitiesState, id: string) => s.communities.find((c) => c.id === id) ?? s.searchResults.find((c) => c.id === id);
+
+/** Apply a change to one community in BOTH the main list and the search results, so joining a
+ * community you found via search updates it everywhere. */
+const patchCommunity = (s: CommunitiesState, id: string, fn: (c: Community) => Community) => ({
+  communities: s.communities.map((c) => (c.id === id ? fn(c) : c)),
+  searchResults: s.searchResults.map((c) => (c.id === id ? fn(c) : c)),
+});
 
 export const useCommunitiesStore = create<CommunitiesState>((set, get) => ({
   communities: [],
   communitiesHasMore: false,
   loading: false,
   error: null,
+  searchResults: [],
+  searchedQuery: '',
 
-  fetchCommunities: async (userId) => {
-    set({ loading: true, error: null });
-    try {
-      const { rows, hasMore } = await communitiesApi.listCommunities(userId, 0);
-      set({ communities: rows, communitiesHasMore: hasMore, loading: false });
-    } catch (err) {
-      set({ loading: false, error: err instanceof Error ? err.message : 'Could not load communities' });
-    }
-  },
+  fetchCommunities: (userId, opts) =>
+    swr(
+      `communities:${userId}`,
+      async () => {
+        set((s) => ({ loading: s.communities.length === 0, error: null }));
+        try {
+          const { rows, hasMore } = await communitiesApi.listCommunities(userId, 0);
+          set((s) => ({ communities: reconcile(s.communities, rows), communitiesHasMore: hasMore, loading: false }));
+          return true;
+        } catch (err) {
+          set({ loading: false, error: err instanceof Error ? err.message : 'Could not load communities' });
+          return false;
+        }
+      },
+      opts,
+    ),
 
   loadMoreCommunities: async (userId) => {
     try {
@@ -44,29 +71,41 @@ export const useCommunitiesStore = create<CommunitiesState>((set, get) => ({
     }
   },
 
+  searchCommunities: async (userId, query) => {
+    const needle = query.trim().toLowerCase();
+    const seq = ++searchSeq;
+    if (!needle) {
+      set({ searchResults: [], searchedQuery: '' });
+      return;
+    }
+    try {
+      const results = await communitiesApi.searchCommunities(userId, needle);
+      // A newer keystroke may already have started another search — only the latest one wins.
+      if (seq === searchSeq) set({ searchResults: results, searchedQuery: needle });
+    } catch (err) {
+      captureException(err);
+    }
+  },
+
   joinCommunity: async (userId, communityId) => {
-    const prev = get().communities.find((c) => c.id === communityId);
-    set((s) => ({
-      communities: s.communities.map((c) => (c.id === communityId ? { ...c, joined: true, memberCount: c.memberCount + 1 } : c)),
-    }));
+    const prev = findCommunity(get(), communityId);
+    set((s) => patchCommunity(s, communityId, (c) => ({ ...c, joined: true, memberCount: c.memberCount + 1 })));
     try {
       await communitiesApi.joinCommunity(userId, communityId);
     } catch (err) {
-      if (prev) set((s) => ({ communities: s.communities.map((c) => (c.id === communityId ? prev : c)) }));
+      if (prev) set((s) => patchCommunity(s, communityId, () => prev));
       captureException(err);
       throw err;
     }
   },
 
   leaveCommunity: async (userId, communityId) => {
-    const prev = get().communities.find((c) => c.id === communityId);
-    set((s) => ({
-      communities: s.communities.map((c) => (c.id === communityId ? { ...c, joined: false, memberCount: Math.max(0, c.memberCount - 1) } : c)),
-    }));
+    const prev = findCommunity(get(), communityId);
+    set((s) => patchCommunity(s, communityId, (c) => ({ ...c, joined: false, memberCount: Math.max(0, c.memberCount - 1) })));
     try {
       await communitiesApi.leaveCommunity(userId, communityId);
     } catch (err) {
-      if (prev) set((s) => ({ communities: s.communities.map((c) => (c.id === communityId ? prev : c)) }));
+      if (prev) set((s) => patchCommunity(s, communityId, () => prev));
       captureException(err);
       throw err;
     }
@@ -101,7 +140,7 @@ export const useCommunitiesStore = create<CommunitiesState>((set, get) => ({
       const updated = await communitiesApi.updateCommunity(id, patch);
       set((s) => ({
         communities: s.communities.map((c) =>
-          c.id === id ? { ...c, name: updated.name, description: updated.description, location: updated.location, logo: updated.logo, logoUrl: updated.logoUrl } : c,
+          c.id === id ? { ...c, name: updated.name, description: updated.description, location: updated.location, logo: updated.logo, logoUrl: updated.logoUrl, tags: updated.tags } : c,
         ),
       }));
     } catch (err) {

@@ -1,7 +1,7 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, Text, View } from 'react-native';
+import { CutAvatar } from './CutAvatar';
 import { fonts, useTheme } from '../../theme';
-import { avatarUriFor, type AvatarLook } from '../../data/gamerAvatars';
+import type { AvatarLook } from '../../data/gamerAvatars';
 import { getCyberAvatarById } from '../../data/cyberAvatars';
 import { streakGlyph } from '../../data/streaks';
 import { useUiStore } from '../../store/uiStore';
@@ -31,23 +31,22 @@ export function AvatarRing({
 }) {
   const { colors, gradients } = useTheme();
   const streakEmoji = useUiStore((s) => s.streakEmoji);
-  const isCyber = avatarId?.startsWith('male_') || avatarId?.startsWith('female_');
-  const cyberAvatar = isCyber ? getCyberAvatarById(avatarId) : null;
-  const imageSource = uri
-    ? { uri }
-    : cyberAvatar
-    ? cyberAvatar.source
-    : { uri: avatarUriFor(avatarId, name, look) };
+  // Every profile avatar is now one of the cyber presets (or an uploaded photo). Resolving the
+  // preset the same way the Profile screen does keeps an avatar identical everywhere — the old
+  // name-seeded DiceBear fallback showed a different face for ids it didn't recognise.
+  const imageSource = uri ? { uri } : getCyberAvatarById(avatarId).source;
   const showOnline = online ?? live;
   const caption = shortName ?? name;
   return (
     <View style={{ width: Math.max(size, showName ? 72 : size), alignItems: 'center' }}>
-      <LinearGradient colors={gradients.liveRing} style={[styles.ring, { width: size, height: size, borderRadius: size / 2 }]}>
-        <Image
-          source={imageSource}
-          style={{ width: size - 6, height: size - 6, borderRadius: (size - 6) / 2, backgroundColor: colors.surfaceElevated }}
-        />
-      </LinearGradient>
+      <CutAvatar
+        source={imageSource}
+        size={size}
+        cut={Math.max(6, Math.round(size * 0.22))}
+        borderWidth={Math.max(1.5, size / 30)}
+        gradientBorder={[gradients.liveRing[0], gradients.liveRing[1], gradients.liveRing[gradients.liveRing.length - 1]] as [string, string, string]}
+        fill={colors.surfaceElevated}
+      />
       {showOnline ? (
         <View style={[styles.live, { backgroundColor: colors.online }]}>
           <Text style={[styles.liveText, { color: colors.onPrimary }]}>ONLINE</Text>

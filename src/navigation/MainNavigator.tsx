@@ -7,6 +7,7 @@ import { ChatDirectoryScreen } from '../features/chat/screens/ChatDirectoryScree
 import { CreateRoomScreen } from '../features/chat/screens/CreateRoomScreen';
 import { RoomMembersScreen } from '../features/chat/screens/RoomMembersScreen';
 import { RoomMediaScreen } from '../features/chat/screens/RoomMediaScreen';
+import { RoomStarredScreen } from '../features/chat/screens/RoomStarredScreen';
 import { RoomInvitesScreen } from '../features/chat/screens/RoomInvitesScreen';
 import { RoomJoinRequestsScreen } from '../features/chat/screens/RoomJoinRequestsScreen';
 import { CreateHubScreen } from '../features/create/screens/CreateHubScreen';
@@ -28,7 +29,10 @@ import { ConnectionsScreen } from '../features/network/screens/ConnectionsScreen
 import { NetworkScreen } from '../features/network/screens/NetworkScreen';
 import { PeopleListScreen } from '../features/network/screens/PeopleListScreen';
 import { PostTeamRequestScreen } from '../features/network/screens/PostTeamRequestScreen';
+import { TeamRequestsListScreen } from '../features/network/screens/TeamRequestsListScreen';
 import { TeamRequestApplicantsScreen } from '../features/network/screens/TeamRequestApplicantsScreen';
+import { TeamRequestDetailScreen } from '../features/network/screens/TeamRequestDetailScreen';
+import { MyTeamRequestsScreen } from '../features/network/screens/MyTeamRequestsScreen';
 import { MyPostsScreen } from '../features/profile/screens/MyPostsScreen';
 import { NotificationsScreen } from '../features/profile/screens/NotificationsScreen';
 import { PaymentResultScreen } from '../features/profile/screens/PaymentResultScreen';
@@ -61,6 +65,7 @@ export function MainNavigator() {
       <Stack.Screen name="ExpertProfile" component={ExpertProfileScreen} />
       <Stack.Screen name="ExpertsList" component={ExpertsListScreen} />
       <Stack.Screen name="Network" component={NetworkScreen} />
+      <Stack.Screen name="TeamRequestsList" component={TeamRequestsListScreen} />
       <Stack.Screen name="PeopleList" component={PeopleListScreen} />
       <Stack.Screen name="Profile" component={ProfileScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
@@ -76,8 +81,11 @@ export function MainNavigator() {
       <Stack.Screen name="MyDemos" component={MyDemosScreen} />
       <Stack.Screen name="Connections" component={ConnectionsScreen} />
       <Stack.Screen name="TeamRequestApplicants" component={TeamRequestApplicantsScreen} />
+      <Stack.Screen name="TeamRequestDetail" component={TeamRequestDetailScreen} />
+      <Stack.Screen name="MyTeamRequests" component={MyTeamRequestsScreen} />
       <Stack.Screen name="RoomMembers" component={RoomMembersScreen} />
       <Stack.Screen name="RoomMedia" component={RoomMediaScreen} />
+      <Stack.Screen name="RoomStarred" component={RoomStarredScreen} />
       <Stack.Screen name="RoomInvites" component={RoomInvitesScreen} />
       <Stack.Screen name="RoomJoinRequests" component={RoomJoinRequestsScreen} />
       <Stack.Screen name="CreateCommunity" component={CreateCommunityScreen} options={{ presentation: 'modal' }} />

@@ -2,6 +2,18 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './client';
 import type { ChatroomMessageRow, NotificationRow, PostCommentRow, PostRow } from './types';
 
+let channelSeq = 0;
+
+/** Topic name for a postgres_changes subscription. supabase-js returns the SAME channel object for
+ * a repeated topic, and calling `.on()` on one that's already subscribed throws ("cannot add
+ * `postgres_changes` callbacks … after `subscribe()`"). React re-runs effects (dependency
+ * changes, fast remounts) before the previous instance's async `removeChannel` has finished, so a
+ * fixed topic collides. A per-call suffix always yields a fresh channel. (Broadcast channels like
+ * typing must keep a shared topic across clients, so they don't use this.) */
+function uniqueTopic(base: string): string {
+  return `${base}:${++channelSeq}`;
+}
+
 /** Live INSERT/UPDATE feed for one room's messages — replaces the old generic
  * src/services/realtime/socket.ts stub, which modeled a Socket.IO-style single connection
  * with named events. Supabase Realtime is channel-scoped and Postgres-CDC-based, so each
@@ -13,7 +25,7 @@ export function subscribeToRoomMessages(
   onUpdate: (row: ChatroomMessageRow) => void,
 ): () => void {
   const channel = supabase
-    .channel(`room-messages:${roomId}`)
+    .channel(uniqueTopic(`room-messages:${roomId}`))
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'chatroom_messages', filter: `chatroom_id=eq.${roomId}` },
@@ -31,10 +43,20 @@ export function subscribeToRoomMessages(
   };
 }
 
-export function subscribeToRoomReactions(roomId: string, onChange: () => void): () => void {
+export type ReactionChange = { type: 'INSERT' | 'DELETE'; messageId: string; userId: string; emoji: string };
+
+/** message_reactions has no room column to filter on, so this fires for reactions in EVERY room.
+ * Callers get the changed row (primary key = message_id + user_id + emoji, so DELETE carries it
+ * all) and must ignore messages that aren't in their thread — never refetch on each event. */
+export function subscribeToRoomReactions(roomId: string, onChange: (change: ReactionChange) => void): () => void {
   const channel = supabase
-    .channel(`room-reactions:${roomId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => onChange())
+    .channel(uniqueTopic(`room-reactions:${roomId}`))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+      const row = (payload.eventType === 'DELETE' ? payload.old : payload.new) as { message_id?: string; user_id?: string; emoji?: string } | undefined;
+      if (!row?.message_id || !row.user_id || !row.emoji) return;
+      if (payload.eventType !== 'INSERT' && payload.eventType !== 'DELETE') return;
+      onChange({ type: payload.eventType, messageId: row.message_id, userId: row.user_id, emoji: row.emoji });
+    })
     .subscribe();
   return () => {
     supabase.removeChannel(channel);
@@ -43,7 +65,7 @@ export function subscribeToRoomReactions(roomId: string, onChange: () => void): 
 
 export function subscribeToNotifications(userId: string, onInsert: (row: NotificationRow) => void): () => void {
   const channel = supabase
-    .channel(`notifications:${userId}`)
+    .channel(uniqueTopic(`notifications:${userId}`))
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
@@ -87,7 +109,7 @@ export function subscribeToNewPosts(onInsert: (row: PostRow) => void): () => voi
  * subscriptions by "how many single-post screens are open" rather than feed size × user count. */
 export function subscribeToPostReactions(postId: string, onChange: () => void): () => void {
   const channel = supabase
-    .channel(`post-reactions:${postId}`)
+    .channel(uniqueTopic(`post-reactions:${postId}`))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions', filter: `post_id=eq.${postId}` }, () => onChange())
     .subscribe();
   return () => {
@@ -97,7 +119,7 @@ export function subscribeToPostReactions(postId: string, onChange: () => void): 
 
 export function subscribeToPostComments(postId: string, onInsert: (row: PostCommentRow) => void): () => void {
   const channel = supabase
-    .channel(`post-comments:${postId}`)
+    .channel(uniqueTopic(`post-comments:${postId}`))
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'post_comments', filter: `post_id=eq.${postId}` },

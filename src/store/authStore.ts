@@ -10,6 +10,8 @@ import { clearIdentity, identifyUser, track } from '../services/analytics/analyt
 import { deleteAccount as deleteAccountApi } from '../services/supabase/account';
 import type { SignUpFields } from '../services/supabase/auth';
 import type { User } from '../types/user';
+import { resetSwr, swr, type FetchOpts } from './swr';
+import { clearOnboardingDraft } from '../services/onboardingDraft';
 
 type AuthState = {
   hydrated: boolean;
@@ -47,10 +49,18 @@ type AuthState = {
   ) => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  refreshUser: (opts?: FetchOpts) => Promise<void>;
 };
 
 let authListenerRegistered = false;
+
+/** A refetched profile is plain JSON, so a structural compare tells us whether anything really
+ * changed. Returning the PREVIOUS object when nothing did keeps `user` referentially stable —
+ * dozens of screens key effects/refetches on `user`, and a fresh-but-identical object on every
+ * refresh used to retrigger all of them (a refetch loop on Home and Profile). */
+function stableUser(prev: User | null, next: User): User {
+  return prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   hydrated: false,
@@ -83,12 +93,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     supabase.auth.onAuthStateChange(async (event, session) => {
       if (!session) {
+        resetSwr();
         set({ session: null, user: null, onboarded: false, passwordRecovery: false });
+        return;
+      }
+      // A token refresh only swaps the session; the profile can't have changed, so don't refetch
+      // it (and don't hand every screen a new `user`). The initial-session event just repeats
+      // what bootstrap already loaded.
+      if (event === 'TOKEN_REFRESHED' || (event === 'INITIAL_SESSION' && get().user)) {
+        set({ session });
         return;
       }
       try {
         const row = await getProfile(session.user.id);
-        set({ session, user: profileRowToUser(row, session.user.email ?? ''), onboarded: row.onboarded });
+        set((s) => ({ session, user: stableUser(s.user, profileRowToUser(row, session.user.email ?? '')), onboarded: row.onboarded }));
       } catch {
         set({ session });
       }
@@ -192,6 +210,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   cancelPasswordRecovery: async () => {
     set({ passwordRecovery: false });
     await authApi.signOut().catch(() => undefined);
+    resetSwr();
     set({ session: null, user: null, onboarded: false });
   },
 
@@ -219,11 +238,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const session = get().session;
     if (!session) throw new Error('No active session');
     const withUploadedAvatar = await uploadAvatarIfLocal(session.user.id, partial);
-    // approvalStatus: 'pending' only ever takes effect server-side when the account was
-    // previously 'rejected' (resubmission) — the enforce_profile_immutable_columns trigger
-    // strips it back to the current value for every other case, so it's always safe to send.
-    const row = await updateProfile(session.user.id, { ...withUploadedAvatar, onboarded: true, approvalStatus: 'pending' });
-    set({ user: profileRowToUser(row, session.user.email ?? ''), onboarded: true });
+    // Order matters: everything that can fail comes BEFORE the profile is marked `onboarded`.
+    // Marking it first meant a failure afterwards (the expert application, say) left the account
+    // "onboarded" with nothing submitted — the app then skipped onboarding on the next login and
+    // parked the user on the "You're Almost In" screen. The application upsert is idempotent, so a
+    // retry after a later failure is safe.
     if (expertApplication) {
       await upsertExpertApplication({
         id: session.user.id,
@@ -235,6 +254,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         linkedin_url: expertApplication.linkedinUrl || null,
       });
     }
+    // approvalStatus: 'pending' only ever takes effect server-side when the account was
+    // previously 'rejected' (resubmission) — the enforce_profile_immutable_columns trigger
+    // strips it back to the current value for every other case, so it's always safe to send.
+    const row = await updateProfile(session.user.id, { ...withUploadedAvatar, onboarded: true, approvalStatus: 'pending' });
+    set({ user: profileRowToUser(row, session.user.email ?? ''), onboarded: true });
+    clearOnboardingDraft(session.user.id);
     // Matches the spec's "notification permission prompt" as the true last onboarding step —
     // a no-op if already granted/denied or if push isn't configured yet (see registerForPush.ts).
     registerForPushNotifications(session.user.id).catch(() => undefined);
@@ -245,6 +270,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (userId) await unregisterCurrentPushToken(userId);
     await authApi.signOut();
     clearIdentity();
+    resetSwr();
     set({ session: null, user: null, onboarded: false, passwordRecovery: false });
   },
 
@@ -253,6 +279,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await deleteAccountApi();
     if (userId) await unregisterCurrentPushToken(userId).catch(() => undefined);
     clearIdentity();
+    resetSwr();
     set({ session: null, user: null, onboarded: false, passwordRecovery: false });
   },
 
@@ -260,14 +287,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // someone else (an admin approving/rejecting the account, or its expert application)
   // should show up without a full logout/login. No realtime subscription exists for
   // profiles, so screens that care (ProfileScreen's own view) call this on focus.
-  refreshUser: async () => {
+  refreshUser: async (opts) => {
     const session = get().session;
     if (!session) return;
-    try {
-      const row = await getProfile(session.user.id);
-      set({ user: profileRowToUser(row, session.user.email ?? ''), onboarded: row.onboarded });
-    } catch {
-      // Best-effort — leave the existing cached user in place on failure.
-    }
+    await swr(
+      `profile:${session.user.id}`,
+      async () => {
+        try {
+          const row = await getProfile(session.user.id);
+          set((s) => ({ user: stableUser(s.user, profileRowToUser(row, session.user.email ?? '')), onboarded: row.onboarded }));
+          return true;
+        } catch {
+          // Best-effort — leave the existing cached user in place on failure.
+          return false;
+        }
+      },
+      opts,
+    );
   },
 }));

@@ -1,15 +1,14 @@
 import React from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts } from '../../theme';
+import { CutAvatar } from '../avatars/CutAvatar';
 
 const DEFAULT_DEV_AVATAR = require('../../../assets/avatars/extracted/female_10.jpg');
 
@@ -41,20 +40,17 @@ export function CyberDeveloperCard({
     <Pressable onPress={onPress} style={styles.cardContainer} accessibilityRole="button">
       {/* Outer Chamfer-Cut Purple Gradient Card */}
       <CyberCutBox
-        cutSize={12}
+        cutSize={16}
         radius={6}
         gradient
+        gradientDiagonal
+        gradientColors={['#8A2BE2', '#6D35FF', '#C026D3']}
         style={styles.cutCard}
       >
-        <LinearGradient
-          colors={['#8A2BE2', '#6D35FF', '#C026D3']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.gradientCard}
-        >
+        <View style={styles.gradientCard}>
           {/* Avatar in Framed Box */}
           <View style={styles.avatarBox}>
-            <Image source={resolvedSource} style={styles.avatarImg} />
+            <CutAvatar source={resolvedSource} size={48} cut={12} borderColor="rgba(255, 255, 255, 0.55)" borderWidth={1.5} fill="rgba(255, 255, 255, 0.2)" />
           </View>
 
           {/* Developer Name */}
@@ -97,7 +93,7 @@ export function CyberDeveloperCard({
               </Text>
             </CyberCutBox>
           </Pressable>
-        </LinearGradient>
+        </View>
       </CyberCutBox>
     </Pressable>
   );
@@ -121,11 +117,7 @@ const styles = StyleSheet.create({
   avatarBox: {
     width: 48,
     height: 48,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    padding: 2,
     marginBottom: 8,
-    overflow: 'hidden',
   },
   avatarImg: {
     width: '100%',

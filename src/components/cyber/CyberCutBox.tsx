@@ -6,8 +6,6 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
 import Svg, { Defs, LinearGradient as SvgGradient, Path, Stop } from 'react-native-svg';
 import { useTheme } from '../../theme';
 
@@ -22,6 +20,8 @@ export interface CyberCutBoxProps {
    * cyan/purple/magenta trio. Used for e.g. a red-toned danger CTA that still renders through
    * this component's own SVG-gradient chamfer path instead of a separate button component. */
   gradientColors?: [string, string, string];
+  /** Runs the gradient top-left → bottom-right instead of left → right. */
+  gradientDiagonal?: boolean;
   borderColor?: string;
   borderWidth?: number;
   onLayout?: (e: LayoutChangeEvent) => void;
@@ -60,6 +60,7 @@ export function CyberCutBox({
   fill = 'transparent',
   gradient = false,
   gradientColors,
+  gradientDiagonal = false,
   borderColor = 'transparent',
   borderWidth = 0,
   onLayout,
@@ -113,6 +114,7 @@ export function CyberCutBox({
   );
   const rawId = useId();
   const gradId = `cyber-cut-grad-${rawId.replace(/:/g, '')}`;
+  const sheenId = `cyber-cut-sheen-${rawId.replace(/:/g, '')}`;
 
   const handleLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -157,22 +159,6 @@ export function CyberCutBox({
 
   return (
     <View style={[styles.container, style]} onLayout={handleLayout}>
-      {showGlass && w > 0 && h > 0 && (
-        <View style={[StyleSheet.absoluteFill, { borderRadius: r, overflow: 'hidden' }]} pointerEvents="none">
-          <BlurView intensity={60} tint={light ? 'light' : 'dark'} style={StyleSheet.absoluteFill} />
-          {/* Subtle left-to-right sheen highlight */}
-          <ExpoLinearGradient
-            colors={
-              light
-                ? ['rgba(255, 255, 255, 0.7)', 'rgba(255, 255, 255, 0.15)']
-                : ['rgba(255, 255, 255, 0)', 'rgba(255, 255, 255, 0.05)']
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0.02 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-      )}
       {w > 0 && h > 0 && (
         <Svg
           width={w}
@@ -181,13 +167,19 @@ export function CyberCutBox({
           pointerEvents="none"
         >
           <Defs>
+            {showGlass && (
+              <SvgGradient id={sheenId} x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={light ? 0.7 : 0.10} />
+                <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={light ? 0.15 : 0.015} />
+              </SvgGradient>
+            )}
             {gradient && (
               <SvgGradient
                 id={gradId}
                 x1="0%"
                 y1="0%"
                 x2="100%"
-                y2="0%"
+                y2={gradientDiagonal ? '100%' : '0%'}
               >
                 <Stop offset="0%" stopColor={gradientColors?.[0] ?? defaultGrad[0]} />
                 <Stop offset="50%" stopColor={gradientColors?.[1] ?? defaultGrad[1]} />
@@ -201,13 +193,14 @@ export function CyberCutBox({
               gradient
                 ? `url(#${gradId})`
                 : showGlass
-                ? (light ? colors.cardFill : withGlassAlpha(effectiveFill, 0.22))
+                ? (light ? colors.cardFill : withGlassAlpha(effectiveFill, 0.5))
                 : effectiveFill
             }
             stroke={effectiveBorder || 'none'}
             strokeWidth={borderWidth}
             strokeLinejoin="round"
           />
+          {showGlass && <Path d={pathData} fill={`url(#${sheenId})`} />}
         </Svg>
       )}
       {children}

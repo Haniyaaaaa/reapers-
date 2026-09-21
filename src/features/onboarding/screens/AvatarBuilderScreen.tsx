@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberButton } from '../../../components/cyber/CyberButton';
@@ -31,16 +32,19 @@ const THUMB_SIZE = Math.floor((CONTENT_MAX_WIDTH - (GRID_COLUMNS - 1) * 10) / GR
 
 interface AvatarBuilderProps {
   initialAvatarId?: string;
+  initialAvatarUri?: string;
   userName?: string;
   stepLabel?: string;
   progressPercent?: string;
   showHeader?: boolean;
-  onSaveAvatar?: (avatar: CyberAvatarItem) => void;
+  /** `customUri` is set only when the user uploaded their own photo instead of a preset. */
+  onSaveAvatar?: (avatar: CyberAvatarItem, customUri?: string) => void;
   onClose?: () => void;
 }
 
 export function AvatarBuilderScreen({
   initialAvatarId = DEFAULT_AVATAR_ID,
+  initialAvatarUri,
   userName = 'Kade Rourke',
   stepLabel = 'STEP 1 OF 5 · AVATAR',
   progressPercent = '100%',
@@ -50,13 +54,29 @@ export function AvatarBuilderScreen({
 }: AvatarBuilderProps) {
   const { colors, isLight } = useTheme();
   const [selectedAvatarId, setSelectedAvatarId] = useState<string>(initialAvatarId);
+  const [customUri, setCustomUri] = useState<string | undefined>(initialAvatarUri);
   const currentAvatar = getCyberAvatarById(selectedAvatarId);
+
+  const selectPreset = (id: string) => {
+    setCustomUri(undefined);
+    setSelectedAvatarId(id);
+  };
+
+  const handleUploadPhoto = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+    if (!res.canceled && res.assets[0]) setCustomUri(res.assets[0].uri);
+  };
 
   // Randomize button picks an arbitrary avatar from the 22 options
   const handleRandomize = () => {
     const remaining = CYBER_AVATARS.filter((a) => a.id !== selectedAvatarId);
     const random = remaining[Math.floor(Math.random() * remaining.length)];
-    if (random) setSelectedAvatarId(random.id);
+    if (random) selectPreset(random.id);
   };
 
   // Suggest set picks an avatar from the opposite or featured set
@@ -64,12 +84,13 @@ export function AvatarBuilderScreen({
     const isFemale = currentAvatar.gender === 'female';
     const oppositeSet = CYBER_AVATARS.filter((a) => (isFemale ? a.gender === 'male' : a.gender === 'female'));
     const pick = oppositeSet[Math.floor(Math.random() * oppositeSet.length)];
-    if (pick) setSelectedAvatarId(pick.id);
+    if (pick) selectPreset(pick.id);
   };
 
   const handleSave = () => {
-    onSaveAvatar?.(currentAvatar);
-    onClose?.();
+    // Saving must not also fire onClose — that's the Cancel/back action (it sent onboarding
+    // back to the Skills step right after moving forward to Review).
+    onSaveAvatar?.(currentAvatar, customUri);
   };
 
   return (
@@ -129,7 +150,7 @@ export function AvatarBuilderScreen({
                   end={{ x: 1, y: 1 }}
                   style={styles.auraRingGradient}
                 >
-                  <Image source={currentAvatar.source} style={styles.heroImage} />
+                  <Image source={customUri ? { uri: customUri } : currentAvatar.source} style={styles.heroImage} />
                 </LinearGradient>
 
                 {/* Floating LVL 1 Chamfer Pill */}
@@ -149,7 +170,7 @@ export function AvatarBuilderScreen({
               <Text style={[styles.userName, { color: colors.text }]}>{userName}</Text>
 
               {/* Traits Subtitle */}
-              <Text style={[styles.traitsText, { color: colors.muted }]}>{currentAvatar.traits}</Text>
+              <Text style={[styles.traitsText, { color: colors.muted }]}>{customUri ? 'CUSTOM PHOTO' : currentAvatar.traits}</Text>
 
               {/* Action Buttons: RANDOMIZE & SUGGEST SET */}
               <View style={styles.actionRow}>
@@ -184,6 +205,22 @@ export function AvatarBuilderScreen({
                     </View>
                   </CyberCutBox>
                 </Pressable>
+
+                <Pressable onPress={handleUploadPhoto} style={styles.actionPressable} accessibilityRole="button" accessibilityLabel="Upload your own photo">
+                  <CyberCutBox
+                    cutSize={8}
+                    radius={4}
+                    fill={isLight ? 'rgba(0, 180, 216, 0.1)' : 'rgba(0, 229, 255, 0.1)'}
+                    borderColor="#00E5FF"
+                    borderWidth={1}
+                    style={styles.actionCutBox}
+                  >
+                    <View style={styles.actionInner}>
+                      <Ionicons name="image-outline" size={13} color="#00E5FF" />
+                      <Text style={[styles.actionText, { color: '#00E5FF' }]}>UPLOAD PHOTO</Text>
+                    </View>
+                  </CyberCutBox>
+                </Pressable>
               </View>
             </View>
 
@@ -194,12 +231,12 @@ export function AvatarBuilderScreen({
               {/* 5-Column Avatars Grid */}
               <View style={styles.avatarGrid}>
                 {CYBER_AVATARS.map((item) => {
-                  const isSelected = item.id === selectedAvatarId;
+                  const isSelected = !customUri && item.id === selectedAvatarId;
 
                   return (
                     <Pressable
                       key={item.id}
-                      onPress={() => setSelectedAvatarId(item.id)}
+                      onPress={() => selectPreset(item.id)}
                       style={[
                         styles.thumbPressable,
                         { width: THUMB_SIZE, height: THUMB_SIZE },
@@ -397,6 +434,8 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: 12,
   },
   actionPressable: {

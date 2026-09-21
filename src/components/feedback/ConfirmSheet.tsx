@@ -1,6 +1,7 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
+import { useSingleFlight } from '../../hooks/useSingleFlight';
 
 const DANGER_GRADIENT: [string, string, string] = ['#FF6B81', '#FF4D6D', '#B91C4C'];
 
@@ -22,7 +23,8 @@ export function ConfirmSheet({
   title: string;
   body: string;
   confirmLabel?: string;
-  onConfirm: () => void;
+  /** If this returns a promise the sheet shows "Working…" and ignores every tap until it settles. */
+  onConfirm: () => unknown;
   onClose: () => void;
   extraActions?: { label: string; onPress: () => void }[];
   /** Most call sites are destructive (delete) or a report/flag action — red reads correctly
@@ -30,10 +32,16 @@ export function ConfirmSheet({
   danger?: boolean;
 }) {
   const { colors, light } = useTheme();
+  const { run, pending } = useSingleFlight(onConfirm);
+  // A label that already reads as a status ("Booking…") is kept; otherwise show a generic one.
+  const workingLabel = confirmLabel.endsWith('…') ? confirmLabel : 'Working…';
+  const guardedClose = () => {
+    if (!pending) onClose();
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={guardedClose}>
+      <Pressable style={styles.backdrop} onPress={guardedClose}>
         <Pressable
           style={[
             styles.sheet,
@@ -53,7 +61,7 @@ export function ConfirmSheet({
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
           <Text style={[styles.body, { color: colors.muted }]}>{body}</Text>
 
-          <Pressable onPress={onConfirm} style={styles.confirmBtnWrap} accessibilityRole="button">
+          <Pressable onPress={run} disabled={pending} style={[styles.confirmBtnWrap, pending && { opacity: 0.75 }]} accessibilityRole="button" accessibilityState={{ busy: pending }}>
             <CyberCutBox
               gradient
               gradientColors={danger ? DANGER_GRADIENT : undefined}
@@ -62,18 +70,25 @@ export function ConfirmSheet({
               style={styles.confirmCutBox}
             >
               <View style={styles.confirmInner}>
-                <Text style={styles.confirmText}>{confirmLabel}</Text>
+                {pending ? (
+                  <View style={styles.workingRow}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmText}>{workingLabel}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmText}>{confirmLabel}</Text>
+                )}
               </View>
             </CyberCutBox>
           </Pressable>
 
           {extraActions?.map((a) => (
-            <Pressable key={a.label} onPress={a.onPress} style={styles.secondaryBtn} accessibilityRole="button">
+            <Pressable key={a.label} onPress={a.onPress} disabled={pending} style={[styles.secondaryBtn, pending && { opacity: 0.4 }]} accessibilityRole="button">
               <Text style={[styles.secondaryText, { color: colors.electricAccent }]}>{a.label}</Text>
             </Pressable>
           ))}
 
-          <Pressable onPress={onClose} style={styles.secondaryBtn} accessibilityRole="button">
+          <Pressable onPress={guardedClose} disabled={pending} style={[styles.secondaryBtn, pending && { opacity: 0.4 }]} accessibilityRole="button">
             <Text style={[styles.cancelText, { color: colors.muted }]}>{cancelText(confirmLabel)}</Text>
           </Pressable>
         </Pressable>
@@ -112,6 +127,7 @@ const styles = StyleSheet.create({
   confirmBtnWrap: { width: '100%', height: 50 },
   confirmCutBox: { width: '100%', height: '100%' },
   confirmInner: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  workingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   confirmText: {
     fontFamily: fonts.bodySemi,
     fontSize: 15,

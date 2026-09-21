@@ -30,7 +30,29 @@ function communityRowToCommunity(row: CommunityRow, joined: boolean): Community 
     memberCount: row.member_count,
     joined,
     location: row.location ?? undefined,
+    tags: row.tags,
   };
+}
+
+/** Server-side search across name, short name, description and location, so it finds a community
+ * wherever it sits — not just among the first page the list screen happens to have loaded.
+ * Biggest communities first. Characters that would break PostgREST's `or()` syntax are stripped. */
+export async function searchCommunities(userId: string, query: string, limit = 40): Promise<Community[]> {
+  const needle = query.replace(/[,()%*\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!needle) return [];
+  const pattern = `%${needle}%`;
+  const [{ data: rows, error }, { data: memberships }] = await Promise.all([
+    supabase
+      .from('communities')
+      .select('*')
+      .or(`name.ilike.${pattern},short_name.ilike.${pattern},description.ilike.${pattern},location.ilike.${pattern}`)
+      .order('member_count', { ascending: false })
+      .limit(limit),
+    supabase.from('community_members').select('community_id').eq('user_id', userId),
+  ]);
+  if (error) throw error;
+  const joinedIds = new Set((memberships ?? []).map((m) => m.community_id));
+  return (rows ?? []).map((r) => communityRowToCommunity(r, joinedIds.has(r.id)));
 }
 
 export async function listCommunities(userId: string, offset = 0, limit = PAGE_SIZE): Promise<Page<Community>> {
@@ -55,6 +77,7 @@ export async function createCommunity(input: {
   description: string;
   location?: string;
   logoUrl?: string;
+  tags?: string[];
 }): Promise<Community> {
   const { data, error } = await supabase
     .from('communities')
@@ -65,6 +88,7 @@ export async function createCommunity(input: {
       description: input.description,
       location: input.location,
       logo_url: input.logoUrl,
+      tags: input.tags,
     })
     .select()
     .single();
@@ -76,7 +100,7 @@ export async function createCommunity(input: {
 
 export async function updateCommunity(
   id: string,
-  patch: { name?: string; description?: string; location?: string; logoUrl?: string },
+  patch: { name?: string; description?: string; location?: string; logoUrl?: string; tags?: string[] },
 ): Promise<Community> {
   const { data, error } = await supabase
     .from('communities')
@@ -85,6 +109,7 @@ export async function updateCommunity(
       description: patch.description,
       location: patch.location,
       logo_url: patch.logoUrl,
+      tags: patch.tags,
     })
     .eq('id', id)
     .select()

@@ -21,3 +21,24 @@ export function formatDateBlock(iso: string) {
 export function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
 }
+
+function isSameCalendarDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+export function isSameDay(isoA: string, isoB: string): boolean {
+  return isSameCalendarDay(new Date(isoA), new Date(isoB));
+}
+
+/** WhatsApp-style day label for the floating date pill between messages: "Today", "Yesterday",
+ * or a full date — with the year only shown once it's no longer the current year. */
+export function formatDayLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (isSameCalendarDay(d, now)) return 'Today';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameCalendarDay(d, yesterday)) return 'Yesterday';
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric', year: sameYear ? undefined : 'numeric' });
+}

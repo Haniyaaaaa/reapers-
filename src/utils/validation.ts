@@ -20,3 +20,26 @@ export function passwordStrength(value: string) {
 export function fieldErrorColor(hasError: boolean) {
   return hasError ? colors.danger : colors.border;
 }
+
+const URL_RE = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(\/\S*)?$/i;
+
+export function isUrl(value: string) {
+  return URL_RE.test(value.trim());
+}
+
+export function isLinkedInUrl(value: string) {
+  return isUrl(value) && /(^|\.|\/\/)linkedin\.com(\/|$)/i.test(value.trim());
+}
+
+/** Stores links with an explicit scheme so they open correctly wherever they're rendered. */
+export function normalizeUrl(value: string) {
+  const v = value.trim();
+  if (!v) return '';
+  return /^https?:\/\//i.test(v) ? v : `https://${v}`;
+}
+
+const USERNAME_RE = /^[a-z0-9._-]{3,20}$/;
+
+export function isValidUsername(value: string) {
+  return USERNAME_RE.test(value.trim().toLowerCase());
+}

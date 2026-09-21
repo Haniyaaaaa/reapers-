@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
+  FlatList,
   Image,
   Modal,
   Pressable,
@@ -11,6 +13,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { TicketPlanSheet, TicketQuantitySheet } from '../../../components/events/TicketBookingSheets';
+import { formatMoney } from '../../../utils/money';
+import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
+import { MAX_TICKETS_PER_ORDER, registrationClosesAt, type TicketPlan } from '../../../types/event';
+import { getEventVenue } from '../../../services/supabase/events';
+import { formatDuration } from '../../../utils/eventSchedule';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,13 +32,14 @@ import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { EventPassCard } from '../../../components/events/EventPassCard';
-import { getCyberAvatarSource } from '../../../data/cyberAvatars';
+import { getCyberAvatarSource, resolveAvatarSource } from '../../../data/cyberAvatars';
 import { useAuth } from '../../../hooks/useAuth';
 import { useEventStore } from '../../../store/eventStore';
 import { uploadPaymentProof } from '../../../services/supabase/storage';
 import type { MainStackParamList } from '../../../navigation/types';
 import { EMPTY_ARRAY } from '../../../utils/emptyArray';
 import { fonts, useTheme } from '../../../theme';
+import { CutAvatar } from '../../../components/avatars/CutAvatar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 32, 430);
@@ -49,6 +58,8 @@ export function EventDetailScreen() {
   const fetchAttendees = useEventStore((s) => s.fetchAttendees);
   const payoutAccounts = useEventStore((s) => (params?.id ? s.payoutAccounts[params.id] ?? EMPTY_ARRAY : EMPTY_ARRAY));
   const fetchPayoutAccounts = useEventStore((s) => s.fetchPayoutAccounts);
+  const storedPlans = useEventStore((s) => (params?.id ? s.ticketPlans[params.id] : undefined));
+  const fetchTicketPlans = useEventStore((s) => s.fetchTicketPlans);
   const myApplication = useEventStore((s) => (params?.id ? s.myApplication[params.id] : undefined));
   const fetchMyApplication = useEventStore((s) => s.fetchMyApplication);
   const submitApplication = useEventStore((s) => s.submitApplication);
@@ -64,20 +75,39 @@ export function EventDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showAttendees, setShowAttendees] = useState(false);
+  // Exact venue / join link — RLS returns it only to the host and people with a confirmed RSVP,
+  // so null here means "not revealed to this viewer yet" (re-fetched when their RSVP changes).
+  const [venue, setVenue] = useState<string | null>(null);
 
   // Paid event application modal state
   const [showPayModal, setShowPayModal] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
+  // Booking steps: choose plan (when there's more than one) -> how many -> payment proof.
+  const [planSheetOpen, setPlanSheetOpen] = useState(false);
+  const [qtySheetOpen, setQtySheetOpen] = useState(false);
+  const [bookPlan, setBookPlan] = useState<TicketPlan | null>(null);
+  const [bookQty, setBookQty] = useState(1);
   const [proofUri, setProofUri] = useState<string | undefined>();
 
   // Downloadable pass modal state
   const [showPassModal, setShowPassModal] = useState(false);
   const [sharingPass, setSharingPass] = useState(false);
-  const passRef = useRef<ViewShotRef>(null);
+  const passRefs = useRef<(ViewShotRef | null)[]>([]);
+  const [passIndex, setPassIndex] = useState(0);
 
   useEffect(() => {
     if (events.length === 0 && user) fetchEvents(user.id);
   }, [events.length, user, fetchEvents]);
+
+  useEffect(() => {
+    if (!event?.id) return;
+    getEventVenue(event.id).then(setVenue).catch(() => setVenue(null));
+  }, [event?.id, event?.rsvp, isOwn]);
+
+  useEffect(() => {
+    if (event?.id && event.paid) fetchTicketPlans(event.id);
+  }, [event?.id, event?.paid, fetchTicketPlans]);
 
   useEffect(() => {
     if (event?.id) fetchAttendees(event.id);
@@ -140,13 +170,40 @@ export function EventDetailScreen() {
   }
 
   const past = new Date(event.startsAt).getTime() < Date.now();
+  // Sign-ups stop before the event starts (host's choice). Someone already registered can still
+  // cancel or download their pass; only NEW registrations are blocked.
+  const closesAt = registrationClosesAt(event);
+  const registrationClosed = Date.now() >= closesAt.getTime();
+  const closeDelta = closesAt.getTime() - Date.now();
+  const closesInText =
+    closeDelta <= 0
+      ? 'Closed'
+      : closeDelta < 3600000
+      ? `${Math.max(1, Math.ceil(closeDelta / 60000))} min left`
+      : closeDelta < 86400000
+      ? `${Math.floor(closeDelta / 3600000)}h ${Math.floor((closeDelta % 3600000) / 60000)}m left`
+      : `${Math.ceil(closeDelta / 86400000)} days left`;
   const paid = !!event.paid && (event.price ?? 0) > 0;
   const isGoing = event.rsvp === 'going';
+  const currency = event.currency || 'PKR';
+  // Events created before ticket plans existed have none: treat the event price as one plan.
+  const plans: TicketPlan[] = storedPlans && storedPlans.length > 0 ? storedPlans : [{ name: 'Standard ticket', price: event.price ?? 0 }];
+  const minPrice = Math.min(...plans.map((p) => p.price));
+  const priceLabel = plans.length > 1 ? `From ${formatMoney(minPrice, currency)}` : formatMoney(plans[0]?.price ?? 0, currency);
+  // Capacity is counted in tickets; never offer more than what's left.
+  const ticketsLeft = event.maxAttendees ? Math.max(0, event.maxAttendees - event.attendeeCount) : MAX_TICKETS_PER_ORDER;
+  const maxQty = Math.max(1, Math.min(MAX_TICKETS_PER_ORDER, ticketsLeft));
   const applicationStatus = paid ? myApplication?.status : undefined;
   const showPass = paid && applicationStatus === 'approved';
+  // One pass per ticket bought — a buyer with 3 tickets gets 3 passes to forward to their guests.
+  const ticketTotal = Math.max(1, myApplication?.quantity ?? 1);
 
   const handleToggleRsvp = async () => {
     if (past || !user) return;
+    if (registrationClosed && !isGoing && !isOwn) {
+      setRsvpErr('Registration for this event has closed.');
+      return;
+    }
     if (isGoing) {
       // Cancel RSVP
       setBusy(true);
@@ -161,7 +218,14 @@ export function EventDetailScreen() {
     }
 
     if (paid) {
-      setShowPayModal(true);
+      // Start booking: pick a plan if there's a choice, then how many.
+      setBookQty(1);
+      if (plans.length > 1) {
+        setPlanSheetOpen(true);
+      } else {
+        setBookPlan(plans[0]);
+        setQtySheetOpen(true);
+      }
       return;
     }
 
@@ -201,6 +265,8 @@ export function EventDetailScreen() {
         await resubmitApplication(event.id, myApplication.id, {
           payoutAccountId: selectedAccountId,
           proofScreenshotPath: path,
+          ticketPlanId: bookPlan?.id,
+          quantity: Math.min(bookQty, maxQty),
         });
       } else {
         await submitApplication({
@@ -208,6 +274,8 @@ export function EventDetailScreen() {
           applicantId: user.id,
           payoutAccountId: selectedAccountId,
           proofScreenshotPath: path,
+          ticketPlanId: bookPlan?.id,
+          quantity: Math.min(bookQty, maxQty),
         });
       }
       setShowPayModal(false);
@@ -223,9 +291,9 @@ export function EventDetailScreen() {
     if (sharingPass) return;
     setSharingPass(true);
     try {
-      const uri = await passRef.current?.capture?.();
+      const uri = await passRefs.current[passIndex]?.capture?.();
       if (uri && (await Sharing.isAvailableAsync())) {
-        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `${event.title} — Pass` });
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `${event.title} — Pass${ticketTotal > 1 ? ` ${passIndex + 1} of ${ticketTotal}` : ''}` });
       }
     } catch {
       // Sharing sheet dismissal/cancellation also rejects — nothing actionable to show the user.
@@ -248,7 +316,16 @@ export function EventDetailScreen() {
     hour12: true,
     timeZone: 'Asia/Karachi',
   });
-  const endDate = new Date(eventDate.getTime() + 3 * 60 * 60 * 1000);
+  // Real end time when the host set one; older events fall back to the previous 3h assumption.
+  const endDate = event.endsAt ? new Date(event.endsAt) : new Date(eventDate.getTime() + 3 * 60 * 60 * 1000);
+  const formattedEndDate = endDate.toLocaleDateString('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'Asia/Karachi',
+  });
+  const spansDays = formattedEndDate !== formattedDate;
+  const durationText = event.endsAt ? formatDuration(event.startsAt, event.endsAt) : '';
   const endTime = endDate.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
@@ -419,7 +496,7 @@ export function EventDetailScreen() {
 
               <View style={styles.pricePill}>
                 <Text style={styles.pricePillText}>
-                  {paid ? `${event.currency || 'PKR'} ${event.price}` : 'FREE'}
+                  {paid ? priceLabel : 'FREE'}
                 </Text>
               </View>
             </View>
@@ -431,19 +508,14 @@ export function EventDetailScreen() {
         <View style={[styles.mainBody, { maxWidth: CONTENT_MAX_WIDTH }]}>
           {/* ================= 2. ORGANISED BY ================= */}
           <View style={styles.organisedByRow}>
-            <CyberCutBox
-              cutSize={10}
-              radius={6}
+            <CutAvatar
+              source={resolveAvatarSource(event.posterAvatarUri, event.posterAvatarId)}
+              size={48}
+              cut={12}
               fill={colors.cardFill}
               borderColor={colors.cardBorder}
               borderWidth={1}
-              style={styles.hostAvatarCutBox}
-            >
-              <Image
-                source={getCyberAvatarSource('male_5')}
-                style={styles.hostAvatarImg}
-              />
-            </CyberCutBox>
+            />
 
             <View style={styles.hostInfoCol}>
               <Text style={[styles.organisedByLabel, { color: colors.primary }]}>ORGANISED BY</Text>
@@ -458,36 +530,61 @@ export function EventDetailScreen() {
 
           {/* ================= 3. LOGISTICS CHAMFER CARD ================= */}
           <CyberCutBox
-            cutSize={14}
+            cutSize={16}
             radius={8}
-            fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
+            fill={isDark ? 'rgba(18, 14, 36, 0.6)' : colors.cardFill}
+            borderColor={isDark ? 'rgba(168, 85, 247, 0.25)' : colors.cardBorder}
+            borderWidth={1}
+            glass
             style={styles.logisticsCard}
           >
             <View style={styles.logisticsInner}>
-              {/* Row 1: Date */}
+              {/* Row 1: Start — its own row, date and time together */}
               <View style={styles.logisticsRow}>
                 <View style={[styles.logisticsIconBox, { backgroundColor: isDark ? 'rgba(0, 229, 255, 0.12)' : 'rgba(14, 165, 233, 0.12)' }]}>
                   <Ionicons name="calendar-outline" size={17} color={colors.primary} />
                 </View>
                 <View style={styles.logisticsTextCol}>
-                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>DATE</Text>
-                  <Text style={[styles.logisticsValue, { color: colors.text }]}>{formattedDate}</Text>
+                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>STARTS</Text>
+                  <Text style={[styles.logisticsValue, { color: colors.text }]}>{formattedDate} · {startTime}</Text>
                 </View>
               </View>
 
-              {/* Row 2: Time */}
+              {/* Row 2: End — its own row, with the duration on the right */}
               <View style={[styles.logisticsRow, styles.logisticsBorder, { borderTopColor: colors.cardBorder }]}>
                 <View style={[styles.logisticsIconBox, { backgroundColor: isDark ? 'rgba(109, 53, 255, 0.15)' : 'rgba(109, 53, 255, 0.1)' }]}>
-                  <Ionicons name="time-outline" size={17} color="#6D35FF" />
+                  <Ionicons name="flag-outline" size={17} color="#6D35FF" />
                 </View>
                 <View style={styles.logisticsTextCol}>
-                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>TIME</Text>
-                  <Text style={[styles.logisticsValue, { color: colors.text }]}>
-                    {startTime} – {endTime} PKT
+                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>ENDS</Text>
+                  <Text style={[styles.logisticsValue, { color: colors.text }]}>{formattedEndDate} · {endTime} PKT</Text>
+                </View>
+                {durationText ? (
+                  <View style={[styles.durationPill, { backgroundColor: colors.cardBorder }]}>
+                    <Ionicons name="time-outline" size={12} color={colors.primary} />
+                    <Text style={[styles.durationText, { color: colors.primary }]}>{durationText}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Registration deadline */}
+              <View style={[styles.logisticsRow, styles.logisticsBorder, { borderTopColor: colors.cardBorder }]}>
+                <View style={[styles.logisticsIconBox, { backgroundColor: isDark ? 'rgba(255, 77, 109, 0.14)' : 'rgba(255, 77, 109, 0.1)' }]}>
+                  <Ionicons name="hourglass-outline" size={17} color="#FF4D6D" />
+                </View>
+                <View style={styles.logisticsTextCol}>
+                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>REGISTRATION CLOSES</Text>
+                  <Text style={[styles.logisticsValue, { color: registrationClosed ? '#FF4D6D' : colors.text }]}>
+                    {(event.registrationClosesBeforeMin ?? 0) === 0
+                      ? 'When the event starts'
+                      : closesAt.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Karachi' })}
                   </Text>
                 </View>
+                {!past ? (
+                  <View style={[styles.durationPill, { backgroundColor: colors.cardBorder }]}>
+                    <Text style={[styles.durationText, { color: registrationClosed ? '#FF4D6D' : colors.primary }]}>{closesInText}</Text>
+                  </View>
+                ) : null}
               </View>
 
               {/* Row 3: Location / Online */}
@@ -500,9 +597,26 @@ export function EventDetailScreen() {
                   />
                 </View>
                 <View style={styles.logisticsTextCol}>
-                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>{event.type.toUpperCase()}</Text>
+                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>
+                    {event.type.toLowerCase() === 'online' ? 'ONLINE' : 'NEARBY AREA'}
+                  </Text>
                   <Text style={[styles.logisticsValue, { color: colors.text }]}>
-                    {event.location || (event.type.toLowerCase() === 'online' ? 'Canada / Online' : 'Physical Venue')}
+                    {event.location || (event.type.toLowerCase() === 'online' ? 'Online' : 'Physical Venue')}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Row 4: Exact venue / join link — revealed only after RSVP confirmation */}
+              <View style={[styles.logisticsRow, styles.logisticsBorder, { borderTopColor: colors.cardBorder }]}>
+                <View style={[styles.logisticsIconBox, { backgroundColor: isDark ? 'rgba(245, 197, 66, 0.15)' : 'rgba(245, 197, 66, 0.15)' }]}>
+                  <Ionicons name={venue ? 'navigate-outline' : 'lock-closed-outline'} size={17} color="#F5C542" />
+                </View>
+                <View style={styles.logisticsTextCol}>
+                  <Text style={[styles.logisticsLabel, { color: colors.muted2 }]}>
+                    {event.type.toLowerCase() === 'online' ? 'JOIN LINK' : event.type.toLowerCase() === 'hybrid' ? 'VENUE + LINK' : 'EXACT VENUE'}
+                  </Text>
+                  <Text style={[styles.logisticsValue, { color: venue ? colors.text : colors.muted }]}>
+                    {venue ?? 'Revealed after your RSVP is confirmed'}
                   </Text>
                 </View>
               </View>
@@ -510,6 +624,49 @@ export function EventDetailScreen() {
           </CyberCutBox>
 
           {/* ================= 4. ABOUT EVENT ================= */}
+          {/* ================= TICKET PLANS (paid events with a choice) ================= */}
+          {paid && plans.length > 1 ? (
+            <>
+              {renderSectionHeader('Tickets')}
+              <View style={{ gap: 8, marginBottom: 8 }}>
+                {plans.map((p, i) => (
+                  <CyberCutBox
+                    key={p.id ?? p.name}
+                    cutSize={14}
+                    radius={8}
+                    fill={isDark ? 'rgba(18, 14, 36, 0.6)' : colors.cardFill}
+                    borderColor={isDark ? 'rgba(168, 85, 247, 0.25)' : colors.cardBorder}
+                    borderWidth={1}
+                    glass
+                  >
+                    <View style={styles.ticketRow}>
+                      {/* Ticket stub: icon on the left, torn off from the body by a dashed perforation */}
+                      <View style={styles.ticketStub}>
+                        <LinearGradient
+                          colors={i % 2 === 0 ? ['#00E5FF', '#6D35FF'] : ['#6D35FF', '#D83CFF']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.ticketIconWrap}
+                        >
+                          <Ionicons name="ticket" size={22} color="#FFFFFF" />
+                        </LinearGradient>
+                      </View>
+                      <View style={[styles.ticketPerforation, { borderColor: colors.muted2 }]} />
+                      <View style={styles.ticketBody}>
+                        <Text style={[styles.ticketName, { color: colors.text }]} numberOfLines={2}>{p.name}</Text>
+                        <Text style={[styles.ticketSub, { color: colors.muted }]}>PER PERSON</Text>
+                      </View>
+                      <View style={styles.ticketPriceWrap}>
+                        <Text style={[styles.ticketCurrency, { color: colors.muted }]}>{currency}</Text>
+                        <Text style={[styles.ticketPrice, { color: colors.primary }]}>{p.price.toLocaleString('en-US')}</Text>
+                      </View>
+                    </View>
+                  </CyberCutBox>
+                ))}
+              </View>
+            </>
+          ) : null}
+
           {renderSectionHeader('About Event')}
           <Text style={[styles.aboutText, { color: colors.text }]}>
             {event.description || 'Niagra Falls tour in cohort of Canada.'}
@@ -517,36 +674,32 @@ export function EventDetailScreen() {
 
           {/* ================= 5. ATTENDEES ================= */}
           {renderSectionHeader('Attendees')}
+          {/* The count is the event's own public total (tickets), so it's right for everyone. Who
+              exactly is going is only visible to the host (RSVP rows are private to them), so the
+              avatars and the full list are host-only. */}
           <Text style={[styles.attendeesSubtext, { color: colors.muted }]}>
-            {attendees.length > 0
-              ? `${attendees.length} ${attendees.length === 1 ? 'person' : 'people'} attending`
+            {event.attendeeCount > 0
+              ? `${event.attendeeCount.toLocaleString()} ${event.attendeeCount === 1 ? 'person' : 'people'} going${event.maxAttendees ? ` · ${Math.max(0, event.maxAttendees - event.attendeeCount).toLocaleString()} spots left` : ''}`
               : 'Be the first to RSVP for this event!'}
           </Text>
 
-          {attendees.length > 0 && (
-            <View style={styles.attendeesRow}>
+          {isOwn && attendees.length > 0 ? (
+            <Pressable onPress={() => setShowAttendees(true)} style={styles.attendeesRow} accessibilityRole="button" accessibilityLabel="See everyone who is going">
               <View style={styles.avatarStack}>
-                {attendees.slice(0, 4).map((att, i) => (
-                  <View
-                    key={att.userId}
-                    style={[styles.miniAvatarBox, { marginLeft: i > 0 ? -8 : 0, zIndex: 10 - i, borderColor: colors.background }]}
-                  >
-                    <Image
-                      source={
-                        att.avatarUri
-                          ? { uri: att.avatarUri }
-                          : getCyberAvatarSource(att.avatarId || 'male_1')
-                      }
-                      style={styles.miniAvatarImg}
-                    />
+                {attendees.slice(0, 5).map((att, i) => (
+                  <View key={att.userId} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: 10 - i }}>
+                    <CutAvatar source={resolveAvatarSource(att.avatarUri, att.avatarId || 'male_1')} size={26} cut={7} borderWidth={1.5} borderColor={colors.background} />
                   </View>
                 ))}
+                {attendees.length > 5 ? (
+                  <View style={[styles.moreBubble, { marginLeft: -8, backgroundColor: colors.cardFill, borderColor: colors.cardBorder }]}>
+                    <Text style={[styles.moreBubbleText, { color: colors.text }]}>+{attendees.length - 5}</Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={[styles.attendeeCountText, { color: colors.muted }]}>
-                {attendees.length} {attendees.length === 1 ? 'MEMBER' : 'MEMBERS'}
-              </Text>
-            </View>
-          )}
+              <Text style={[styles.attendeeCountText, { color: colors.primary }]}>SEE ALL ›</Text>
+            </Pressable>
+          ) : null}
 
           <View style={styles.tagsRow}>
             {[event.category || event.type || 'MEETUP', paid ? 'PAID' : 'FREE'].map((t, idx) => (
@@ -569,7 +722,7 @@ export function EventDetailScreen() {
         <View style={[styles.bottomBarInner, { maxWidth: CONTENT_MAX_WIDTH }]}>
           <View style={styles.bottomMetaCol}>
             <Text style={[styles.bottomPriceText, { color: colors.primary }]}>
-              {paid ? `${event.currency || 'PKR'} ${event.price}` : 'FREE · RSVP OPEN'}
+              {paid ? priceLabel : 'FREE · RSVP OPEN'}
             </Text>
             <Text style={[styles.bottomDateText, { color: colors.text }]}>{formattedDate}</Text>
           </View>
@@ -581,8 +734,8 @@ export function EventDetailScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={showPass ? () => setShowPassModal(true) : handleToggleRsvp}
-              disabled={busy || past || applicationStatus === 'pending'}
+              onPress={showPass ? () => { setPassIndex(0); setShowPassModal(true); } : handleToggleRsvp}
+              disabled={busy || past || applicationStatus === 'pending' || (registrationClosed && !isGoing && !showPass)}
               style={styles.rsvpBtn}
               accessibilityRole="button"
             >
@@ -600,6 +753,8 @@ export function EventDetailScreen() {
                       ? 'Download Pass'
                       : applicationStatus === 'pending'
                       ? 'Pending Approval'
+                      : registrationClosed && !isGoing
+                      ? 'Registration closed'
                       : applicationStatus === 'rejected'
                       ? 'Reapply'
                       : isGoing
@@ -614,6 +769,66 @@ export function EventDetailScreen() {
           )}
         </View>
       </View>
+
+      {/* ================= ALL ATTENDEES (host) ================= */}
+      <Modal visible={showAttendees} transparent animationType="slide" onRequestClose={() => setShowAttendees(false)}>
+        <Pressable style={styles.attBackdrop} onPress={() => setShowAttendees(false)}>
+          <View onStartShouldSetResponder={() => true} style={[styles.attSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.attHeader}>
+              <Text style={[styles.attTitle, { color: colors.text }]}>Going · {event.attendeeCount.toLocaleString()}</Text>
+              <Pressable onPress={() => setShowAttendees(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+                <Ionicons name="close" size={22} color={colors.text} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={attendees}
+              keyExtractor={(a) => a.userId}
+              contentContainerStyle={{ paddingBottom: 24 }}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => useProfilePreviewStore.getState().open(item.userId)}
+                  style={[styles.attRow, { borderBottomColor: colors.cardBorder }]}
+                  accessibilityRole="button"
+                >
+                  <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId || 'male_1')} size={40} cut={10} borderWidth={1} />
+                  <Text style={[styles.attName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+                  {item.ticketCount > 1 ? (
+                    <View style={[styles.attTicketPill, { backgroundColor: colors.cardBorder }]}>
+                      <Text style={[styles.attTicketText, { color: colors.primary }]}>{item.ticketCount} TICKETS</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ================= TICKET BOOKING STEPS ================= */}
+      <TicketPlanSheet
+        visible={planSheetOpen}
+        plans={plans}
+        currency={currency}
+        onClose={() => setPlanSheetOpen(false)}
+        onSelect={(p) => {
+          setBookPlan(p);
+          setPlanSheetOpen(false);
+          setQtySheetOpen(true);
+        }}
+      />
+      <TicketQuantitySheet
+        visible={qtySheetOpen}
+        plan={bookPlan}
+        currency={currency}
+        quantity={Math.min(bookQty, maxQty)}
+        maxQuantity={maxQty}
+        onChange={setBookQty}
+        onClose={() => setQtySheetOpen(false)}
+        onContinue={() => {
+          setQtySheetOpen(false);
+          setShowPayModal(true);
+        }}
+      />
 
       {/* ================= PAID RSVP MODAL ================= */}
       <Modal visible={showPayModal} transparent animationType="fade">
@@ -643,7 +858,9 @@ export function EventDetailScreen() {
               ) : null}
 
               <Text style={[styles.modalSub, { color: colors.muted }]}>
-                This is a paid event ({event.currency || 'PKR'} {event.price}). Upload your payment proof below to request access.
+                {bookPlan
+                  ? `${bookQty} × ${bookPlan.name} — total ${formatMoney(bookPlan.price * bookQty, currency)}. Pay this amount to the host's account, then upload your payment proof below to request access.`
+                  : `This is a paid event (${priceLabel}). Upload your payment proof below to request access.`}
               </Text>
 
               <Pressable onPress={pickProofImage} style={[styles.uploadBox, { borderColor: colors.cardBorder, backgroundColor: isDark ? 'transparent' : 'rgba(0,0,0,0.02)' }]}>
@@ -664,7 +881,10 @@ export function EventDetailScreen() {
               >
                 <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: 44 }}>
                   <View style={styles.rsvpGradient}>
-                    <Text style={styles.rsvpBtnText}>{myApplication?.status === 'rejected' ? 'Resubmit Application' : 'Submit Application'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+                      <Text style={styles.rsvpBtnText}>{busy ? 'Submitting…' : myApplication?.status === 'rejected' ? 'Resubmit Application' : 'Submit Application'}</Text>
+                    </View>
                   </View>
                 </CyberCutBox>
               </Pressable>
@@ -685,22 +905,43 @@ export function EventDetailScreen() {
             <Ionicons name="close-circle" size={32} color="#FFFFFF" />
           </Pressable>
 
-          <ViewShot ref={passRef} options={{ format: 'png', quality: 1 }}>
-            <EventPassCard
-              event={event}
-              attendeeName={user?.displayName ?? 'Attendee'}
-              attendeeAvatarSource={user?.avatarUri ? { uri: user.avatarUri } : getCyberAvatarSource(user?.avatarId)}
-              reservationCode={myApplication?.reservationCode ?? '—'}
-              formattedDate={formattedDate}
-              startTime={startTime}
-              endTime={endTime}
-            />
-          </ViewShot>
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            style={{ flexGrow: 0, width: SCREEN_WIDTH }}
+            onMomentumScrollEnd={(e) => setPassIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH))}
+          >
+            {Array.from({ length: ticketTotal }).map((_, i) => (
+              <View key={i} style={{ width: SCREEN_WIDTH, alignItems: 'center' }}>
+                <ViewShot ref={(r) => { passRefs.current[i] = r; }} options={{ format: 'png', quality: 1 }}>
+                  <EventPassCard
+                    event={event}
+                    attendeeName={user?.displayName ?? 'Attendee'}
+                    attendeeAvatarSource={user?.avatarUri ? { uri: user.avatarUri } : getCyberAvatarSource(user?.avatarId)}
+                    reservationCode={myApplication?.reservationCode ?? '—'}
+                    formattedDate={formattedDate}
+                    startTime={startTime}
+                    endTime={endTime}
+                    ticketNumber={i + 1}
+                    ticketTotal={ticketTotal}
+                    planName={myApplication?.planName}
+                    unitPrice={myApplication?.unitPrice}
+                  />
+                </ViewShot>
+              </View>
+            ))}
+          </ScrollView>
+          {ticketTotal > 1 ? (
+            <Text style={styles.passPagerText}>
+              Ticket {passIndex + 1} of {ticketTotal} · swipe for the others — each ticket has its own code to send to your guest
+            </Text>
+          ) : null}
 
           <Pressable onPress={handleSharePass} disabled={sharingPass} style={styles.passShareBtn} accessibilityRole="button">
             <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: '100%' }}>
               <View style={styles.rsvpGradient}>
-                <Text style={styles.rsvpBtnText}>{sharingPass ? 'Preparing…' : 'Download / Share Pass'}</Text>
+                <Text style={styles.rsvpBtnText}>{sharingPass ? 'Preparing…' : ticketTotal > 1 ? `Download / Share Ticket ${passIndex + 1}` : 'Download / Share Pass'}</Text>
               </View>
             </CyberCutBox>
           </Pressable>
@@ -1088,6 +1329,32 @@ const styles = StyleSheet.create({
     right: 20,
     zIndex: 10,
   },
+  durationPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 26, borderRadius: 13 },
+  durationText: { fontFamily: fonts.monoBold, fontSize: 11, letterSpacing: 0.5 },
+  ticketRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingRight: 16 },
+  ticketStub: { width: 64, alignItems: 'center', justifyContent: 'center' },
+  ticketIconWrap: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-12deg' }] },
+  ticketPerforation: { alignSelf: 'stretch', width: 0, borderLeftWidth: 1.5, borderStyle: 'dashed', marginVertical: -2, opacity: 0.5 },
+  ticketBody: { flex: 1, paddingHorizontal: 14, gap: 3 },
+  ticketName: { fontFamily: fonts.bodySemi, fontSize: 16, fontWeight: '700' },
+  ticketSub: { fontFamily: fonts.mono, fontSize: 9.5, letterSpacing: 0.9 },
+  ticketPriceWrap: { alignItems: 'flex-end' },
+  ticketCurrency: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.8 },
+  ticketPrice: { fontFamily: fonts.display, fontSize: 21, fontWeight: '800' },
+  planLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  planLineName: { fontFamily: fonts.bodySemi, fontSize: 14, fontWeight: '600', flexShrink: 1 },
+  planLinePrice: { fontFamily: fonts.monoBold, fontSize: 13 },
+  moreBubble: { minWidth: 26, height: 26, borderRadius: 13, borderWidth: 1, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  moreBubbleText: { fontFamily: fonts.monoBold, fontSize: 9.5 },
+  attBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
+  attSheet: { maxHeight: '80%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, paddingHorizontal: 20, paddingTop: 18 },
+  attHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  attTitle: { fontFamily: fonts.display, fontSize: 20, fontWeight: '800' },
+  attRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  attName: { flex: 1, fontFamily: fonts.bodySemi, fontSize: 15 },
+  attTicketPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 10 },
+  attTicketText: { fontFamily: fonts.monoBold, fontSize: 9.5, letterSpacing: 0.5 },
+  passPagerText: { color: 'rgba(255,255,255,0.75)', fontSize: 12.5, textAlign: 'center', paddingHorizontal: 32 },
   passShareBtn: {
     width: 220,
     height: 48,

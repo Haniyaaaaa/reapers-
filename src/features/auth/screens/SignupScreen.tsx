@@ -5,7 +5,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -26,6 +25,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { isUsernameAvailable } from '../../../services/supabase/profiles';
 import { fonts, useTheme } from '../../../theme';
 import { isEmail, isPhone, passwordStrength } from '../../../utils/validation';
+import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwareScrollView';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FORM_MAX_WIDTH = Math.min(SCREEN_WIDTH - 40, 420);
@@ -155,7 +155,7 @@ export function SignupScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
-          <ScrollView
+          <KeyboardAwareScrollView
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -269,7 +269,7 @@ export function SignupScreen() {
                   if (phoneErr) setPhoneErr('');
                 }}
                 keyboardType="phone-pad"
-                placeholder="+1 234 567 8900"
+                placeholder="+92 300 1234567"
                 error={phoneErr}
                 onBlur={onPhoneBlur}
                 editable={!submitting}
@@ -339,7 +339,7 @@ export function SignupScreen() {
                 By continuing you agree to the REAPERS Terms and Community Guidelines.
               </Text>
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>

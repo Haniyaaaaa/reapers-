@@ -1,4 +1,5 @@
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef } from 'react';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { fonts } from '../../theme';
 
@@ -7,7 +8,8 @@ type Action = { key: string; label: string; icon: keyof typeof Ionicons.glyphMap
 const ACTIONS: Action[] = [
   { key: 'media', label: 'Photo & Video', icon: 'image-outline', color: '#00E5FF' },
   { key: 'camera', label: 'Camera', icon: 'camera-outline', color: '#D83CFF' },
-  { key: 'gif', label: 'GIF', icon: 'happy-outline', color: '#6D35FF' },
+  { key: 'sticker', label: 'Sticker', icon: 'happy-outline', color: '#F5C542' },
+  { key: 'gif', label: 'GIF', icon: 'planet-outline', color: '#6D35FF' },
 ];
 
 /** The chat dock's "+" button opens this — was previously wired to state (`attaching`) with
@@ -18,29 +20,52 @@ export function AttachmentSheet({
   onClose,
   onPickMedia,
   onCapture,
+  onPickSticker,
   onOpenGif,
 }: {
   visible: boolean;
   onClose: () => void;
   onPickMedia: () => void;
   onCapture: () => void;
+  /** Sends a picture straight from the person's own photo library as a sticker — no bubble
+   * chrome, transparency preserved — rather than only offering the built-in GIF catalog. */
+  onPickSticker: () => void;
   onOpenGif: () => void;
 }) {
+  // iOS can't present a native screen (photo picker, camera, permission alert) while this Modal is
+  // still animating away — the picker silently never appears. So picking an action closes the sheet
+  // first and the action runs once the dismissal has finished (Modal `onDismiss`, iOS-only; other
+  // platforms have no such restriction and run it right away).
+  const pending = useRef<string | null>(null);
+
   const run = (key: string) => {
     if (key === 'media') onPickMedia();
     else if (key === 'camera') onCapture();
+    else if (key === 'sticker') onPickSticker();
     else if (key === 'gif') onOpenGif();
   };
 
+  const flush = () => {
+    const key = pending.current;
+    pending.current = null;
+    if (key) run(key);
+  };
+
+  const choose = (key: string) => {
+    pending.current = key;
+    onClose();
+    if (Platform.OS !== 'ios') flush();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={flush}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => undefined}>
           <View style={styles.grabberRow}>
             <View style={styles.grabber} />
           </View>
           {ACTIONS.map((a) => (
-            <Pressable key={a.key} onPress={() => run(a.key)} style={styles.row} accessibilityRole="button">
+            <Pressable key={a.key} onPress={() => choose(a.key)} style={styles.row} accessibilityRole="button">
               <View style={[styles.iconBox, { backgroundColor: `${a.color}20` }]}>
                 <Ionicons name={a.icon} size={19} color={a.color} />
               </View>
