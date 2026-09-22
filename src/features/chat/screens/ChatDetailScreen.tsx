@@ -1000,7 +1000,7 @@ export function ChatDetailScreen() {
                 }}
               >
                 <Ionicons name="exit-outline" size={19} color={colors.danger} />
-                <Text style={[styles.menuRowText, { color: colors.danger }]}>Leave room</Text>
+                <Text style={[styles.menuRowText, { color: colors.danger }]}>{room?.communityId ? 'Leave community chat' : 'Leave room'}</Text>
               </Pressable>
             ) : null}
 
@@ -1063,8 +1063,12 @@ export function ChatDetailScreen() {
 
       <ConfirmSheet
         visible={leave}
-        title="Leave room?"
-        body="You'll stop receiving messages from this room. You can rejoin later if it's public, or need a new invite if it's private."
+        title={room?.communityId ? "Leave community chat?" : 'Leave room?'}
+        body={
+          room?.communityId
+            ? "You'll stop receiving messages here, but you'll stay a member of the community — you can rejoin its chat anytime from the community page."
+            : "You'll stop receiving messages from this room. You can rejoin later if it's public, or need a new invite if it's private."
+        }
         confirmLabel="Leave"
         onClose={() => setLeave(false)}
         onConfirm={async () => {

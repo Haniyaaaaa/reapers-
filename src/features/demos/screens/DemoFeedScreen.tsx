@@ -105,22 +105,10 @@ export function DemoFeedScreen() {
           accessibilityRole="button"
           accessibilityLabel="Upload demo"
         >
-          <CyberCutBox
-            cutSize={10}
-            radius={4}
-            fill="transparent"
-            borderColor={isLight ? colors.cardBorder : 'rgba(0, 240, 255, 0.6)'}
-            borderWidth={1}
-            style={styles.uploadCutBox}
-          >
-            <LinearGradient
-              colors={['rgba(0, 240, 255, 0.25)', 'rgba(216, 60, 255, 0.35)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.uploadGradient}
-            >
-              <Text style={[styles.uploadBtnText, isLight && { color: colors.text }]}>+ Upload</Text>
-            </LinearGradient>
+          <CyberCutBox gradient cutSize={10} radius={4} style={styles.uploadCutBox}>
+            <View style={styles.uploadGradient}>
+              <Text style={styles.uploadBtnText}>+ Upload</Text>
+            </View>
           </CyberCutBox>
         </Pressable>
       </View>
@@ -161,16 +149,9 @@ export function DemoFeedScreen() {
           accessibilityRole="button"
           accessibilityLabel="Filter options"
         >
-          <CyberCutBox
-            cutSize={10}
-            radius={6}
-            fill={isLight ? colors.cardFill : 'rgba(14, 20, 35, 0.85)'}
-            borderColor={isLight ? colors.cardBorder : 'rgba(0, 240, 255, 0.45)'}
-            borderWidth={1}
-            style={styles.filterBtnCut}
-          >
+          <CyberCutBox gradient cutSize={10} radius={6} style={styles.filterBtnCut}>
             <View style={styles.filterBtnInner}>
-              <Ionicons name="options-outline" size={20} color={isLight ? colors.primary : '#00F0FF'} />
+              <Ionicons name="options-outline" size={20} color="#FFFFFF" />
               {activeFilterCount > 0 ? (
                 <View style={styles.filterBadge}>
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>

@@ -17,11 +17,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { GuidelinesSheet } from '../../../components/feedback/GuidelinesSheet';
+import { useUiStore } from '../../../store/uiStore';
 import { CyberCommunityFeaturedCard } from '../../../components/cards/CyberCommunityFeaturedCard';
 import { CyberCommunityWideCard } from '../../../components/cards/CyberCommunityWideCard';
 import { CyberCommunityCard } from '../../../components/cards/CyberCommunityCard';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
+import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { useAuth } from '../../../hooks/useAuth';
 import { STALE_MS } from '../../../store/swr';
 import { useCommunitiesStore } from '../../../store/communitiesStore';
@@ -72,6 +75,21 @@ export function CommunitiesScreen() {
   const [filters, setFilters] = useState<CommunityFilters>(EMPTY_COMMUNITY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const seenGuidelines = useUiStore((s) => s.seenGuidelines);
+  const markGuidelinesSeen = useUiStore((s) => s.markGuidelinesSeen);
+  const [pendingJoin, setPendingJoin] = useState<Community | null>(null);
+
+  // Joining used to happen instantly with no acknowledgement at all — this routes every join
+  // button on this screen through the same rules/guidelines gate CommunityDetailScreen's own
+  // join already uses, showing the community's real rules when its creator set any.
+  const requestJoin = (c: Community) => {
+    if (!user) return;
+    if (seenGuidelines[c.id]) {
+      joinCommunity(user.id, c.id);
+      return;
+    }
+    setPendingJoin(c);
+  };
 
   useEffect(() => {
     if (user?.id) {
@@ -221,6 +239,8 @@ export function CommunitiesScreen() {
                 {communities.length} GUILDS · {joinedTotal} YOU FOLLOW
               </Text>
             </View>
+
+            {error ? <InlineErrorText message={`Couldn't load communities: ${error}`} /> : null}
 
             <Pressable
               onPress={() => nav.navigate('CreateCommunity')}
@@ -406,7 +426,7 @@ export function CommunitiesScreen() {
               onToggleJoin={async () => {
                 if (!user) return;
                 if (featured.joined) await leaveCommunity(user.id, featured.id);
-                else await joinCommunity(user.id, featured.id);
+                else requestJoin(featured);
               }}
               onAction={() => nav.navigate('CommunityDetail', { id: featured.id })}
             />
@@ -476,10 +496,7 @@ export function CommunitiesScreen() {
                   description={c.description}
                   avatarSource={c.logo}
                   joined={c.joined}
-                  onJoin={async () => {
-                    if (!user) return;
-                    await joinCommunity(user.id, c.id);
-                  }}
+                  onJoin={() => requestJoin(c)}
                   onPress={() => nav.navigate('CommunityDetail', { id: c.id })}
                 />
               ))}
@@ -494,10 +511,18 @@ export function CommunitiesScreen() {
               style={styles.emptyCard}
             >
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                {isFiltering ? 'No communities to discover match' : 'All communities joined!'}
+                {isFiltering
+                  ? 'No communities to discover match'
+                  : communities.length === 0
+                    ? 'No communities yet'
+                    : 'All communities joined!'}
               </Text>
               <Text style={[styles.emptySubtitle, { color: colors.muted }]}>
-                {isFiltering ? 'Try a different search, tag or filter.' : "You're following all public circles in the network."}
+                {isFiltering
+                  ? 'Try a different search, tag or filter.'
+                  : communities.length === 0
+                    ? 'Be the first to start one.'
+                    : "You're following all public circles in the network."}
               </Text>
             </CyberCutBox>
           )}
@@ -533,6 +558,19 @@ export function CommunitiesScreen() {
         locations={locations}
         onClose={() => setShowFilters(false)}
         onApply={setFilters}
+      />
+
+      <GuidelinesSheet
+        visible={!!pendingJoin}
+        communityName={pendingJoin?.name}
+        rules={pendingJoin?.rules}
+        onAccept={() => {
+          if (!user || !pendingJoin) return;
+          markGuidelinesSeen(pendingJoin.id);
+          joinCommunity(user.id, pendingJoin.id);
+          setPendingJoin(null);
+        }}
+        onClose={() => setPendingJoin(null)}
       />
     </View>
   );

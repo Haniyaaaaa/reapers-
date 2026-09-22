@@ -134,6 +134,7 @@ export function CreateCommunityScreen() {
         logoUrl: uploadedLogoUrl,
         location: city.trim() || undefined,
         tags: selectedTags,
+        rules: rules.trim() || undefined,
       });
 
       nav.replace('CommunityDetail', { id: community.id });

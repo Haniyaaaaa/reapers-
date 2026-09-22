@@ -13,7 +13,7 @@ import { colors, fonts } from '../../../theme';
 import { ExpertStatusView } from '../components/ExpertStatusView';
 import { ExpertApplicationFields, type ExpertApplicationValue } from '../components/ExpertApplicationFields';
 
-const EMPTY: ExpertApplicationValue = { role: '', company: '', bio: '', portfolioUrl: '', linkedinUrl: '', tags: [] };
+const EMPTY: ExpertApplicationValue = { role: '', company: '', bio: '', portfolioUrl: '', linkedinUrl: '', tags: [], calUsername: '', calEventSlug: '' };
 
 export function BecomeExpertScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -41,6 +41,8 @@ export function BecomeExpertScreen() {
       portfolioUrl: myApplication.portfolio_url ?? '',
       linkedinUrl: myApplication.linkedin_url ?? '',
       tags: myApplication.specialties,
+      calUsername: myApplication.cal_username ?? '',
+      calEventSlug: myApplication.cal_event_slug ?? '',
     });
     setEditing(true);
   };
@@ -60,6 +62,8 @@ export function BecomeExpertScreen() {
         specialties: value.tags,
         portfolioUrl: value.portfolioUrl.trim(),
         linkedinUrl: value.linkedinUrl.trim(),
+        calUsername: value.calUsername.trim(),
+        calEventSlug: value.calEventSlug.trim(),
       };
       if (myApplication) {
         await updateExpertProfile(user.id, patch);

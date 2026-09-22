@@ -12,4 +12,5 @@ export type Community = {
   joined: boolean;
   location?: string;
   tags: string[];
+  rules?: string;
 };

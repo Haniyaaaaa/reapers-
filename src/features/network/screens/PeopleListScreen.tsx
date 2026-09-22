@@ -80,9 +80,9 @@ export function PeopleListScreen() {
       <Screen refreshControl={refreshControl}>
         <ScreenHeader title="Network" onBack={() => nav.goBack()} />
 
-        <CyberCutBox cutSize={10} radius={6} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.searchBox}>
+        <CyberCutBox cutSize={10} radius={6} fill={colors.inputFill} borderColor="rgba(0, 229, 255, 0.3)" borderWidth={1} style={styles.searchBox}>
           <View style={styles.searchInner}>
-            <Ionicons name="search-outline" size={18} color={colors.muted2} />
+            <Ionicons name="search-outline" size={18} color={colors.cyan} />
             <TextInput
               value={search}
               onChangeText={setSearch}
@@ -94,6 +94,8 @@ export function PeopleListScreen() {
             />
           </View>
         </CyberCutBox>
+
+        <Text style={[styles.countLabel, { color: colors.muted }]}>{filtered.length} {filtered.length === 1 ? 'PERSON' : 'PEOPLE'}</Text>
 
         {!loading && filtered.length === 0 ? <EmptyState title="No one matches yet." /> : null}
 
@@ -116,4 +118,5 @@ const styles = StyleSheet.create({
   searchBox: { height: 44, marginBottom: 14 },
   searchInner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, height: '100%', gap: 10 },
   searchInput: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: '#FFFFFF', height: '100%' },
+  countLabel: { fontFamily: fonts.mono, fontSize: 10.5, letterSpacing: 1.2, marginBottom: 10 },
 });

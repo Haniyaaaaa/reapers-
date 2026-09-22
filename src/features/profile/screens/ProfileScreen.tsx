@@ -60,7 +60,6 @@ export function ProfileScreen() {
   const fetchPeople = useNetworkStore((s) => s.fetchPeople);
   const connectPerson = useNetworkStore((s) => s.connectPerson);
   const startDirectMessage = useChatStore((s) => s.startDirectMessage);
-  const communities = useCommunitiesStore((s) => s.communities);
   const fetchCommunities = useCommunitiesStore((s) => s.fetchCommunities);
 
   const [messaging, setMessaging] = useState(false);
@@ -130,7 +129,7 @@ export function ProfileScreen() {
 
   const portfolioOwnerId = isOwn ? user?.id : params?.id;
 
-  const [stats, setStats] = useState<ProfileStats>({ connections: 0, sessions: 0 });
+  const [stats, setStats] = useState<ProfileStats>({ connections: 0, sessions: 0, communities: 0 });
   // Refetch on focus: connections get accepted and sessions end while this screen stays mounted.
   useFocusEffect(
     useCallback(() => {
@@ -438,7 +437,7 @@ export function ProfileScreen() {
           >
             <View style={styles.statTileInner}>
               <Ionicons name="people-outline" size={16} color="#6D9BFF" />
-              <Text style={[styles.statNumText, { color: colors.text }]}>{isOwn ? communities.filter((c) => c.joined).length : 0}</Text>
+              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.communities.toLocaleString()}</Text>
               <Text style={[styles.statLabelText, { color: colors.muted }]}>COMMUNITIES</Text>
             </View>
           </CyberCutBox>
@@ -857,6 +856,9 @@ const styles = StyleSheet.create({
   identitySection: {
     alignItems: 'center',
     marginBottom: 24,
+    // The avatar's halo rings extend ~30px above it (see haloOuter) — without this, that
+    // overhang gets clipped by the top of the scroll view when the screen is scrolled to top.
+    paddingTop: 24,
   },
   avatarWrap: {
     position: 'relative',

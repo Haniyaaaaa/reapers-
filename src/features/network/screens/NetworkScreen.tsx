@@ -157,7 +157,6 @@ export function NetworkScreen() {
 
           <View style={styles.titleWrap}>
             <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>Find teammates</Text>
-            <Text style={[styles.headerSubtitle, { color: colors.electricAccent }]} numberOfLines={1}>OPEN ROLES AND MATCHING DEVELOPERS</Text>
           </View>
         </View>
 

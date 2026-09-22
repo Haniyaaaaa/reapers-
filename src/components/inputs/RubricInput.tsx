@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { fonts, radius, useTheme } from '../../theme';
 import type { RubricScores } from '../../types/demo';
 
@@ -26,12 +27,17 @@ export function RubricInput({ value, onChange }: { value: RubricScores; onChange
                   accessibilityRole="button"
                   accessibilityLabel={`${label} ${n} of 5`}
                   accessibilityState={{ selected: on }}
-                  style={[
-                    styles.dot,
-                    { borderColor: colors.border },
-                    on && { backgroundColor: colors.magenta, borderColor: colors.magenta },
-                  ]}
-                />
+                  style={[styles.dot, { borderColor: on ? 'transparent' : colors.border }]}
+                >
+                  {on ? (
+                    <LinearGradient
+                      colors={['#00E5FF', '#6D35FF', '#D83CFF']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.dotFill}
+                    />
+                  ) : null}
+                </Pressable>
               );
             })}
           </View>
@@ -45,5 +51,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   label: { fontFamily: fonts.bodyMed, fontSize: 13, width: 90 },
   dots: { flexDirection: 'row', gap: 8 },
-  dot: { width: 28, height: 28, borderRadius: radius.pill, borderWidth: 1 },
+  dot: { width: 28, height: 28, borderRadius: radius.pill, borderWidth: 1, overflow: 'hidden' },
+  dotFill: { width: '100%', height: '100%' },
 });

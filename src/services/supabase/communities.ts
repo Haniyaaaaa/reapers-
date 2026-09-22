@@ -31,6 +31,7 @@ function communityRowToCommunity(row: CommunityRow, joined: boolean): Community 
     joined,
     location: row.location ?? undefined,
     tags: row.tags,
+    rules: row.rules ?? undefined,
   };
 }
 
@@ -78,6 +79,7 @@ export async function createCommunity(input: {
   location?: string;
   logoUrl?: string;
   tags?: string[];
+  rules?: string;
 }): Promise<Community> {
   const { data, error } = await supabase
     .from('communities')
@@ -89,6 +91,7 @@ export async function createCommunity(input: {
       location: input.location,
       logo_url: input.logoUrl,
       tags: input.tags,
+      rules: input.rules,
     })
     .select()
     .single();
@@ -126,8 +129,13 @@ export async function deleteCommunity(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Idempotent: a leftover row from a previous join, or two taps racing, used to throw a
+ * duplicate-key error that surfaced as an easy-to-miss inline error and quietly stopped the
+ * whole "open chatroom" flow dead — already being a member is not a failure worth reporting. */
 export async function joinCommunity(userId: string, communityId: string): Promise<void> {
-  const { error } = await supabase.from('community_members').insert({ community_id: communityId, user_id: userId });
+  const { error } = await supabase
+    .from('community_members')
+    .upsert({ community_id: communityId, user_id: userId }, { onConflict: 'community_id,user_id', ignoreDuplicates: true });
   if (error) throw error;
 }
 

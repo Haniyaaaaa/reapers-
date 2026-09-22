@@ -820,7 +820,7 @@ export function DemoDetailScreen() {
                   <View style={styles.myReviewInner}>
                     <View style={styles.myReviewHeader}>
                       <Pressable onPress={() => useProfilePreviewStore.getState().open(r.reviewerId)} style={styles.reviewerRow}>
-                        <AvatarRing name={r.reviewer} size={24} avatarId={r.avatarId} />
+                        <AvatarRing name={r.reviewer} size={24} uri={r.avatarUri} avatarId={r.avatarId} />
                         <Text style={[styles.myReviewUser, { color: colors.text }]}>{r.reviewer}</Text>
                       </Pressable>
                       <Text style={styles.starsText}>
@@ -892,7 +892,7 @@ export function DemoDetailScreen() {
           {sorted.map((c) => (
             <View key={c.id} style={styles.commentRow}>
               <Pressable onPress={() => useProfilePreviewStore.getState().open(c.userId)}>
-                <AvatarRing name={c.userName} size={36} avatarId={c.avatarId} />
+                <AvatarRing name={c.userName} size={36} uri={c.avatarUri} avatarId={c.avatarId} />
               </Pressable>
               <View style={styles.commentBodyWrap}>
                 <View style={styles.commentUserRow}>

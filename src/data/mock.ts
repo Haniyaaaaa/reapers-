@@ -742,6 +742,7 @@ export const notifications: NotificationItem[] = [
     createdAt: new Date(Date.now() - 3600000).toISOString(),
     read: false,
     target: { screen: 'ChatDetail', id: 'r1' },
+    actorId: null,
   },
   {
     id: 'n2',
@@ -750,6 +751,7 @@ export const notifications: NotificationItem[] = [
     createdAt: new Date(Date.now() - 7200000).toISOString(),
     read: false,
     target: { screen: 'EventDetail', id: 'e2' },
+    actorId: null,
   },
   {
     id: 'n3',
@@ -758,6 +760,7 @@ export const notifications: NotificationItem[] = [
     createdAt: new Date(Date.now() - 86400000 * 1.2).toISOString(),
     read: true,
     target: { screen: 'Network' },
+    actorId: null,
   },
 ];
 

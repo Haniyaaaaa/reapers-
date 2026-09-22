@@ -16,6 +16,11 @@ export type Expert = {
   linkedinUrl?: string;
   portfolioUrl?: string;
   work?: { title: string; company: string; years: string }[];
+  /** Cal.com <username>/<event-type-slug> — when both are set, a booking's meeting link is
+   * generated automatically (see supabase/functions/create-cal-booking) instead of the expert
+   * typing one in after the fact. */
+  calUsername?: string;
+  calEventSlug?: string;
 };
 
 export const EXPERTISE_TAGS = ['Systems', 'Live ops', 'Shaders', 'VFX', 'Narrative', 'Combat', 'Netcode', 'UI', 'Animation', 'Audio'];

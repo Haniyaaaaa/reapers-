@@ -21,11 +21,15 @@ export function PersonListCard({
 }) {
   const { colors, isLight } = useTheme();
   const status = person.connect;
+  const matchTone = matchScore >= 80 ? '#3DDC84' : matchScore >= 60 ? colors.cyan : isLight ? colors.primary : '#C084FC';
+
   return (
-    <Pressable onPress={onPress} style={styles.touch} accessibilityRole="button">
-      <CyberCutBox cutSize={12} radius={8} fill="rgba(14, 20, 35, 0.85)" style={styles.cut}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.touch, pressed && { opacity: 0.85 }]} accessibilityRole="button">
+      <CyberCutBox cutSize={12} radius={8} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={0.88} style={styles.cut}>
         <View style={styles.inner}>
-          <CutAvatar source={resolveAvatarSource(person.avatarUri, person.avatarId)} size={48} cut={12} borderWidth={1} fill={isLight ? colors.surfaceElevated : '#161B2E'} />
+          <View style={[styles.avatarRing, { borderColor: `${matchTone}55` }]}>
+            <CutAvatar source={resolveAvatarSource(person.avatarUri, person.avatarId)} size={48} cut={12} borderWidth={1} fill={isLight ? colors.surfaceElevated : '#161B2E'} />
+          </View>
 
           <View style={styles.info}>
             <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{person.displayName}</Text>
@@ -33,14 +37,8 @@ export function PersonListCard({
             {person.skills.length > 0 ? (
               <View style={styles.tagsRow}>
                 {person.skills.slice(0, 3).map((tag) => (
-                  <View
-                    key={tag}
-                    style={[
-                      styles.tagPill,
-                      isLight && { backgroundColor: 'rgba(109, 53, 255, 0.1)' },
-                    ]}
-                  >
-                    <Text style={styles.tagText}>{tag.toUpperCase()}</Text>
+                  <View key={tag} style={[styles.tagPill, { borderColor: `${colors.primary}40`, backgroundColor: `${colors.primary}12` }]}>
+                    <Text style={[styles.tagText, { color: colors.primary }]}>{tag.toUpperCase()}</Text>
                   </View>
                 ))}
               </View>
@@ -48,39 +46,29 @@ export function PersonListCard({
           </View>
 
           <View style={styles.rightCol}>
-            <Text style={[styles.matchText, isLight && { color: colors.electricAccent }]}>{matchScore}% MATCH</Text>
+            <View style={[styles.matchPill, { borderColor: `${matchTone}66`, backgroundColor: `${matchTone}1A` }]}>
+              <Text style={[styles.matchText, { color: matchTone }]}>{matchScore}%</Text>
+              <Text style={[styles.matchCaption, { color: matchTone }]}>MATCH</Text>
+            </View>
             <Pressable onPress={onConnect} disabled={status !== 'connect'} accessibilityRole="button">
-              <CyberCutBox
-                cutSize={6}
-                radius={3}
-                fill={
-                  status === 'connect'
-                    ? (isLight ? colors.primary : '#FFFFFF')
-                    : status === 'connected'
-                    ? (isLight ? 'rgba(16, 185, 129, 0.12)' : 'rgba(0, 230, 153, 0.15)')
-                    : (isLight ? 'rgba(109, 53, 255, 0.10)' : 'rgba(9, 15, 28, 0.55)')
-                }
-                borderColor={
-                  status === 'connect'
-                    ? 'transparent'
-                    : status === 'connected'
-                    ? (isLight ? 'rgba(16, 185, 129, 0.40)' : 'rgba(0, 230, 153, 0.40)')
-                    : (isLight ? 'rgba(109, 53, 255, 0.35)' : 'rgba(255, 255, 255, 0.35)')
-                }
-                borderWidth={status === 'connect' ? 0 : 1}
-                style={styles.connectCut}
-              >
-                <Text
-                  style={[
-                    styles.connectText,
-                    status === 'connect' && isLight && { color: '#FFFFFF' },
-                    status === 'connected' && (isLight ? { color: '#059669' } : { color: '#00E699' }),
-                    status === 'pending' && (isLight ? { color: '#6D35FF' } : styles.connectTextInactive),
-                  ]}
+              {status === 'connect' ? (
+                <CyberCutBox gradient cutSize={6} radius={3} style={styles.connectCut}>
+                  <Text style={styles.connectTextActive}>Connect</Text>
+                </CyberCutBox>
+              ) : (
+                <CyberCutBox
+                  cutSize={6}
+                  radius={3}
+                  fill={status === 'connected' ? 'rgba(61, 220, 132, 0.14)' : colors.cardBorder}
+                  borderColor={status === 'connected' ? 'rgba(61, 220, 132, 0.5)' : colors.cardBorder}
+                  borderWidth={1}
+                  style={styles.connectCut}
                 >
-                  {status === 'connected' ? '✓ Connected' : status === 'pending' ? 'Pending' : 'Connect'}
-                </Text>
-              </CyberCutBox>
+                  <Text style={[styles.connectText, { color: status === 'connected' ? '#3DDC84' : colors.muted }]}>
+                    {status === 'connected' ? '✓ Connected' : 'Pending'}
+                  </Text>
+                </CyberCutBox>
+              )}
             </Pressable>
           </View>
         </View>
@@ -93,17 +81,18 @@ const styles = StyleSheet.create({
   touch: { marginBottom: 12 },
   cut: { width: '100%' },
   inner: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12 },
-  avatarBox: { width: 48, height: 48, borderRadius: 8, overflow: 'hidden', backgroundColor: '#161B2E' },
-  avatarImg: { width: '100%', height: '100%' },
+  avatarRing: { borderRadius: 14, borderWidth: 1.5, padding: 1 },
   info: { flex: 1, gap: 3 },
-  name: { fontFamily: fonts.bodySemi, fontSize: 14.5, fontWeight: '700', color: '#FFFFFF' },
-  role: { fontFamily: fonts.body, fontSize: 11.5, color: '#8E9BB5' },
-  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 },
-  tagPill: { backgroundColor: 'rgba(109, 53, 255, 0.18)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  tagText: { fontFamily: fonts.mono, fontSize: 8.5, fontWeight: '700', color: '#D83CFF' },
+  name: { fontFamily: fonts.bodySemi, fontSize: 14.5, fontWeight: '700' },
+  role: { fontFamily: fonts.body, fontSize: 11.5 },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 3 },
+  tagPill: { borderRadius: 5, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2.5 },
+  tagText: { fontFamily: fonts.mono, fontSize: 8.5, fontWeight: '700' },
   rightCol: { alignItems: 'flex-end', gap: 8 },
-  matchText: { fontFamily: fonts.mono, fontSize: 9.5, color: '#00E5FF', letterSpacing: 0.4 },
+  matchPill: { alignItems: 'center', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 7, borderWidth: 1 },
+  matchText: { fontFamily: fonts.display, fontSize: 13, fontWeight: '700' },
+  matchCaption: { fontFamily: fonts.mono, fontSize: 7, letterSpacing: 1 },
   connectCut: { height: 30, paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center' },
-  connectText: { fontFamily: fonts.bodySemi, fontSize: 11, fontWeight: '700', color: '#6D35FF' },
-  connectTextInactive: { color: '#FFFFFF' },
+  connectText: { fontFamily: fonts.bodySemi, fontSize: 11, fontWeight: '700' },
+  connectTextActive: { fontFamily: fonts.bodySemi, fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
 });

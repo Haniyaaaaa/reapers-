@@ -290,6 +290,7 @@ export type Database = {
           member_count: number;
           created_by: string | null;
           tags: string[];
+          rules: string | null;
           created_at: string;
         };
         Insert: {
@@ -300,6 +301,7 @@ export type Database = {
           location?: string | null;
           created_by: string;
           tags?: string[];
+          rules?: string | null;
         };
         Update: {
           short_name?: string;
@@ -308,6 +310,7 @@ export type Database = {
           logo_url?: string | null;
           location?: string | null;
           tags?: string[];
+          rules?: string | null;
         };
         Relationships: [];
       };
@@ -542,6 +545,8 @@ export type Database = {
           verified_at: string | null;
           verified_by: string | null;
           rejection_reason: string | null;
+          cal_username: string | null;
+          cal_event_slug: string | null;
         };
         Insert: {
           id: string;
@@ -552,6 +557,8 @@ export type Database = {
           years_experience?: number | null;
           linkedin_url?: string | null;
           portfolio_url?: string | null;
+          cal_username?: string | null;
+          cal_event_slug?: string | null;
         };
         Update: {
           role?: string;
@@ -565,6 +572,8 @@ export type Database = {
           verified_at?: string | null;
           verified_by?: string | null;
           rejection_reason?: string | null;
+          cal_username?: string | null;
+          cal_event_slug?: string | null;
         };
         Relationships: [];
       };
@@ -687,6 +696,7 @@ export type Database = {
           target: Json;
           read: boolean;
           created_at: string;
+          actor_id: string | null;
         };
         Insert: Record<string, never>;
         Update: { read?: boolean };
@@ -1006,7 +1016,7 @@ export type Database = {
       };
       profile_stats: {
         Args: { p_user_id: string };
-        Returns: { connections_count: number; sessions_count: number }[];
+        Returns: { connections_count: number; sessions_count: number; communities_count: number }[];
       };
       effective_limits: {
         Args: { uid: string };
