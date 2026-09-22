@@ -44,13 +44,14 @@ export function demoRowToDemo(row: DemoRowWithDeveloper): Demo {
   };
 }
 
-function commentRowToComment(row: DemoCommentRow, userName: string, avatarId?: string | null): DemoComment {
+function commentRowToComment(row: DemoCommentRow, userName: string, avatarId?: string | null, avatarUri?: string | null): DemoComment {
   return {
     id: row.id,
     demoId: row.demo_id,
     userId: row.user_id,
     userName,
     avatarId: avatarId ?? undefined,
+    avatarUri: avatarUri ?? undefined,
     text: row.text,
     createdAt: row.created_at,
     likes: row.likes_count,
@@ -174,13 +175,13 @@ export async function deleteDemo(id: string): Promise<void> {
 export async function listComments(demoId: string): Promise<DemoComment[]> {
   const { data, error } = await supabase
     .from('demo_comments')
-    .select('*, profiles(display_name, avatar_id)')
+    .select('*, profiles(display_name, avatar_id, avatar_uri)')
     .eq('demo_id', demoId)
     .order('created_at', { ascending: false })
     .limit(200); // safety cap, not full pagination — a comment thread realistically doesn't need infinite scroll
   if (error) throw error;
-  return (data as unknown as (DemoCommentRow & { profiles: { display_name: string; avatar_id: string | null } | null })[]).map((row) =>
-    commentRowToComment(row, row.profiles?.display_name ?? 'Someone', row.profiles?.avatar_id),
+  return (data as unknown as (DemoCommentRow & { profiles: { display_name: string; avatar_id: string | null; avatar_uri: string | null } | null })[]).map((row) =>
+    commentRowToComment(row, row.profiles?.display_name ?? 'Someone', row.profiles?.avatar_id, row.profiles?.avatar_uri),
   );
 }
 
@@ -241,7 +242,7 @@ export async function deleteReview(demoId: string, reviewerId: string): Promise<
   if (error) throw error;
 }
 
-type ReviewRowWithReviewer = DemoReviewRow & { profiles: { display_name: string; avatar_id: string | null } | null };
+type ReviewRowWithReviewer = DemoReviewRow & { profiles: { display_name: string; avatar_id: string | null; avatar_uri: string | null } | null };
 type ReviewVoteRow = { review_id: string; voter_id: string; vote: number };
 
 function reviewRowToReview(row: ReviewRowWithReviewer, myVote: 1 | -1 | null): Review {
@@ -251,6 +252,7 @@ function reviewRowToReview(row: ReviewRowWithReviewer, myVote: 1 | -1 | null): R
     reviewerId: row.reviewer_id,
     reviewer: row.profiles?.display_name ?? 'Someone',
     avatarId: row.profiles?.avatar_id ?? undefined,
+    avatarUri: row.profiles?.avatar_uri ?? undefined,
     scores: { gameplay: row.score_gameplay, art: row.score_art, concept: row.score_concept, polish: row.score_polish },
     comment: row.comment,
     upvotes: row.upvotes,
@@ -269,7 +271,7 @@ export async function listReviews(demoId: string, myUserId?: string): Promise<Re
   // PostgREST a second path between demo_reviews and profiles alongside this direct one.
   const { data, error } = await supabase
     .from('demo_reviews')
-    .select('*, profiles!demo_reviews_reviewer_id_fkey(display_name, avatar_id)')
+    .select('*, profiles!demo_reviews_reviewer_id_fkey(display_name, avatar_id, avatar_uri)')
     .eq('demo_id', demoId)
     .order('created_at', { ascending: false });
   if (error) throw error;

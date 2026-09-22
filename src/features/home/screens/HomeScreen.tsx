@@ -32,6 +32,7 @@ import { AutoCarousel } from '../../../components/layout/AutoCarousel';
 import { CyberCommunityCard } from '../../../components/cards/CyberCommunityCard';
 import { CyberDemoCard } from '../../../components/cards/CyberDemoCard';
 import { CutAvatar } from '../../../components/avatars/CutAvatar';
+import { EXPERT_GOLD, VerifiedSeal } from '../../../components/experts/ExpertBadge';
 import { CyberDeveloperCard } from '../../../components/cards/CyberDeveloperCard';
 import { CyberFeedPostCard } from '../../../components/cards/CyberFeedPostCard';
 import { PostCommentsSheet } from '../../../components/feed/PostCommentsSheet';
@@ -503,7 +504,18 @@ export function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Open profile"
               >
-                <CutAvatar source={currentAvatar.source} size={64} cut={16} />
+                <CutAvatar
+                  source={currentAvatar.source}
+                  size={64}
+                  cut={16}
+                  borderColor={user?.isExpert ? EXPERT_GOLD : 'rgba(216, 60, 255, 0.6)'}
+                  borderWidth={user?.isExpert ? 2.5 : 1.5}
+                />
+                {user?.isExpert ? (
+                  <View style={styles.expertSealBadge}>
+                    <VerifiedSeal size={16} />
+                  </View>
+                ) : null}
                 <View style={styles.onlineStatusDot} />
               </Pressable>
 
@@ -927,7 +939,7 @@ export function HomeScreen() {
                 availableSlot={exp.nextSlot || 'AVAILABLE'}
                 avatarUri={exp.avatar}
                 verified={exp.verified}
-                avatarSource={exp.avatarId ? getCyberAvatarSource(exp.avatarId) : undefined}
+                avatarSource={getCyberAvatarSource(exp.avatarId)}
                 onBook={() => nav.navigate('ExpertProfile', { id: exp.id })}
                 onPress={() => nav.navigate('ExpertProfile', { id: exp.id })}
               />
@@ -1029,6 +1041,11 @@ const styles = StyleSheet.create({
   },
   avatarBoxWrap: {
     position: 'relative',
+  },
+  expertSealBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
   },
   onlineStatusDot: {
     position: 'absolute',

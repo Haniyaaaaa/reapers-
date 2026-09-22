@@ -21,7 +21,7 @@ type CommunitiesState = {
   searchCommunities: (userId: string, query: string) => Promise<void>;
   joinCommunity: (userId: string, communityId: string) => Promise<void>;
   leaveCommunity: (userId: string, communityId: string) => Promise<void>;
-  createCommunity: (input: { createdBy: string; shortName: string; name: string; description: string; location?: string; logoUrl?: string; tags?: string[] }) => Promise<Community>;
+  createCommunity: (input: { createdBy: string; shortName: string; name: string; description: string; location?: string; logoUrl?: string; tags?: string[]; rules?: string }) => Promise<Community>;
   updateCommunity: (id: string, patch: { name?: string; description?: string; location?: string; logoUrl?: string; tags?: string[] }) => Promise<void>;
   deleteCommunity: (id: string) => Promise<void>;
 };

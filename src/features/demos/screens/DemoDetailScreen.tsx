@@ -3,6 +3,7 @@ import { DemoVideoPlayer } from '../../../components/media/DemoVideoPlayer';
 import { openExternalUrl } from '../../../utils/openUrl';
 import { normalizeUrl } from '../../../utils/validation';
 import { ImageViewerModal } from '../../../components/media/ImageViewerModal';
+import { ScreenshotCarousel } from '../../../components/media/ScreenshotCarousel';
 import { ChipPicker } from '../../../components/inputs/ChipPicker';
 import { DEMO_ENGINES, DEMO_GENRES, DEMO_PLATFORMS, DEMO_TAGS, splitGenreEngine } from '../../../data/demoOptions';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -704,22 +705,7 @@ export function DemoDetailScreen() {
           </View>
 
           {(demo.screenshotUrls?.length ?? 0) > 0 ? (
-            <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.screenshotsScroll}>
-              {demo.screenshotUrls!.map((url, i) => (
-                <Pressable key={url} onPress={() => setViewerIndex(i)} accessibilityRole="button" accessibilityLabel={`View screenshot ${i + 1} full size`}>
-                  <CyberCutBox
-                    cutSize={10}
-                    radius={6}
-                    fill={colors.cardFill}
-                    borderColor={colors.cardBorder}
-                    borderWidth={1}
-                    style={styles.screenshotFrame}
-                  >
-                    <Image source={{ uri: url }} style={styles.screenshotImg} resizeMode="cover" />
-                  </CyberCutBox>
-                </Pressable>
-              ))}
-            </KeyboardAwareScrollView>
+            <ScreenshotCarousel urls={demo.screenshotUrls!} onOpen={setViewerIndex} paused={viewerIndex != null} />
           ) : (
             <Text style={[styles.noCommentsText, { color: colors.muted2 }]}>
               {isOwnDemo ? 'No screenshots yet — add some from the edit screen.' : 'No screenshots yet.'}
@@ -834,7 +820,7 @@ export function DemoDetailScreen() {
                   <View style={styles.myReviewInner}>
                     <View style={styles.myReviewHeader}>
                       <Pressable onPress={() => useProfilePreviewStore.getState().open(r.reviewerId)} style={styles.reviewerRow}>
-                        <AvatarRing name={r.reviewer} size={24} avatarId={r.avatarId} />
+                        <AvatarRing name={r.reviewer} size={24} uri={r.avatarUri} avatarId={r.avatarId} />
                         <Text style={[styles.myReviewUser, { color: colors.text }]}>{r.reviewer}</Text>
                       </Pressable>
                       <Text style={styles.starsText}>
@@ -906,7 +892,7 @@ export function DemoDetailScreen() {
           {sorted.map((c) => (
             <View key={c.id} style={styles.commentRow}>
               <Pressable onPress={() => useProfilePreviewStore.getState().open(c.userId)}>
-                <AvatarRing name={c.userName} size={36} avatarId={c.avatarId} />
+                <AvatarRing name={c.userName} size={36} uri={c.avatarUri} avatarId={c.avatarId} />
               </Pressable>
               <View style={styles.commentBodyWrap}>
                 <View style={styles.commentUserRow}>

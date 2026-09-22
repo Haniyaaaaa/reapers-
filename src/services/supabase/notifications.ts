@@ -2,7 +2,11 @@ import { supabase } from './client';
 import type { NotificationRow } from './types';
 import type { NotificationItem } from '../../types/extra';
 
-function notificationRowToItem(row: NotificationRow): NotificationItem {
+type NotificationRowWithActor = NotificationRow & {
+  actor: { avatar_uri: string | null; avatar_id: string | null } | null;
+};
+
+function notificationRowToItem(row: NotificationRowWithActor): NotificationItem {
   return {
     id: row.id,
     title: row.title,
@@ -10,18 +14,21 @@ function notificationRowToItem(row: NotificationRow): NotificationItem {
     createdAt: row.created_at,
     read: row.read,
     target: row.target as NotificationItem['target'],
+    actorId: row.actor_id,
+    actorAvatarUri: row.actor?.avatar_uri ?? undefined,
+    actorAvatarId: row.actor?.avatar_id ?? undefined,
   };
 }
 
 export async function listNotifications(userId: string): Promise<NotificationItem[]> {
   const { data, error } = await supabase
     .from('notifications')
-    .select('*')
+    .select('*, actor:profiles!notifications_actor_id_fkey(avatar_uri, avatar_id)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(100);
   if (error) throw error;
-  return (data ?? []).map(notificationRowToItem);
+  return ((data ?? []) as unknown as NotificationRowWithActor[]).map(notificationRowToItem);
 }
 
 export async function markNotificationRead(id: string): Promise<void> {

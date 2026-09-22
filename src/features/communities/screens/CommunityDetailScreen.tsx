@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Image,
   Pressable,
   Share,
@@ -45,6 +46,7 @@ export function CommunityDetailScreen() {
   const rooms = useChatStore((s) => s.rooms);
   const fetchRooms = useChatStore((s) => s.fetchRooms);
   const joinCommunity = useCommunitiesStore((s) => s.joinCommunity);
+  const leaveCommunity = useCommunitiesStore((s) => s.leaveCommunity);
   const updateCommunity = useCommunitiesStore((s) => s.updateCommunity);
   const deleteCommunity = useCommunitiesStore((s) => s.deleteCommunity);
   const joinRoom = useChatStore((s) => s.joinRoom);
@@ -53,6 +55,8 @@ export function CommunityDetailScreen() {
 
   const [joinErr, setJoinErr] = useState('');
   const [joining, setJoining] = useState(false);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [showGuidelines, setShowGuidelines] = useState(false);
   const seenGuidelines = useUiStore((s) => s.seenGuidelines);
   const markGuidelinesSeen = useUiStore((s) => s.markGuidelinesSeen);
@@ -176,7 +180,9 @@ export function CommunityDetailScreen() {
       }
       nav.navigate('ChatDetail', { id: roomId });
     } catch (err) {
-      setJoinErr(err instanceof Error ? err.message : 'Could not join — try again.');
+      const message = err instanceof Error ? err.message : 'Could not join — try again.';
+      setJoinErr(message);
+      Alert.alert('Could not open chatroom', message);
     } finally {
       setJoining(false);
     }
@@ -383,6 +389,16 @@ export function CommunityDetailScreen() {
               Joining adds you to the official {community.shortName} chatroom and member directory.
             </Text>
           )}
+
+          {/* Leaving here didn't use to exist at all — the only way to leave a community was a
+              small "Joined" pill on the Communities list, easy to miss and nowhere near where
+              you'd naturally look (the community's own page). Not shown for the community's own
+              creator — deleting is the equivalent action for them, via the header trash icon. */}
+          {community.joined && !isOwnCommunity ? (
+            <Pressable onPress={() => setLeaveConfirm(true)} style={styles.leaveLinkTouch} accessibilityRole="button">
+              <Text style={[styles.leaveLinkText, { color: colors.danger }]}>Leave community</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {joinErr ? (
@@ -499,8 +515,28 @@ export function CommunityDetailScreen() {
         onConfirm={confirmDeleteCommunity}
       />
 
+      <ConfirmSheet
+        visible={leaveConfirm}
+        title="Leave community?"
+        body={`You'll leave ${community.name} and its chatroom, and stop appearing in its member directory. You can rejoin anytime if it's public.`}
+        confirmLabel={leaving ? 'Leaving…' : 'Leave'}
+        onClose={() => setLeaveConfirm(false)}
+        onConfirm={async () => {
+          if (!user) return;
+          setLeaving(true);
+          try {
+            await leaveCommunity(user.id, community.id);
+            setLeaveConfirm(false);
+          } finally {
+            setLeaving(false);
+          }
+        }}
+      />
+
       <GuidelinesSheet
         visible={showGuidelines}
+        communityName={community.name}
+        rules={community.rules}
         onAccept={() => {
           markGuidelinesSeen(community.id);
           setShowGuidelines(false);
@@ -687,6 +723,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: 0.6,
+  },
+  leaveLinkTouch: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  leaveLinkText: {
+    fontFamily: fonts.bodyMed,
+    fontSize: 13,
   },
   hintText: {
     fontFamily: fonts.body,

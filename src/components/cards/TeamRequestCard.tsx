@@ -1,3 +1,4 @@
+import type React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CutAvatar } from '../avatars/CutAvatar';
@@ -32,6 +33,16 @@ export function TeamRequestCard({
   const { colors } = useTheme();
   const studioLine = formatStudioLine(team);
   const commitment = formatCommitment(team);
+  const commitmentParts = (commitment ?? '').split('·').map((part) => part.trim()).filter(Boolean);
+  const locationLabel = [workModeLabel(team.workMode), team.location].filter(Boolean).join(' · ');
+  const detailChips: { key: string; icon: React.ComponentProps<typeof Ionicons>['name']; label: string }[] = [
+    ...(team.engine ? [{ key: 'engine', icon: 'hardware-chip-outline' as const, label: team.engine.toUpperCase() }] : []),
+    ...(locationLabel ? [{ key: 'location', icon: 'location-outline' as const, label: locationLabel.toUpperCase() }] : []),
+    ...(team.neededBy
+      ? [{ key: 'needed', icon: 'calendar-outline' as const, label: `BY ${new Date(`${team.neededBy}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}` }]
+      : []),
+    ...commitmentParts.map((part, i) => ({ key: `commit-${part}`, icon: (i === 0 ? 'time-outline' : 'cash-outline') as React.ComponentProps<typeof Ionicons>['name'], label: part.toUpperCase() })),
+  ];
 
   return (
     <Pressable onPress={onPress} disabled={!onPress} style={styles.teamCardTouch} accessibilityRole="button" accessibilityLabel={`View details of ${team.project}`}>
@@ -81,38 +92,23 @@ export function TeamRequestCard({
             </Text>
           ) : null}
 
-          {/* Engine & Location Grid — only the columns the poster filled in */}
-          {team.engine || team.location || team.workMode || team.neededBy ? (
-            <View style={[styles.teamDetailGrid, { backgroundColor: colors.inputFill }]}>
-              {team.engine ? (
-                <View style={styles.gridCol}>
-                  <Text style={[styles.gridLabel, { color: colors.muted2 }]}>ENGINE</Text>
-                  <Text style={[styles.gridValue, { color: colors.text }]}>{team.engine}</Text>
+          {/* Engine, location, deadline and commitment — one wrapping row of chips, so a request
+              with only an engine doesn't reserve a whole box */}
+          {detailChips.length > 0 ? (
+            <View style={styles.commitRow}>
+              {detailChips.map((chip) => (
+                <View key={chip.key} style={[styles.commitChip, { borderColor: 'rgba(0, 229, 255, 0.3)', backgroundColor: 'rgba(0, 229, 255, 0.07)' }]}>
+                  <Ionicons name={chip.icon} size={13} color={colors.cyan} />
+                  <Text style={[styles.commitText, { color: colors.text }]} numberOfLines={1}>{chip.label}</Text>
                 </View>
-              ) : null}
-              {team.workMode || team.location ? (
-                <View style={styles.gridCol}>
-                  <Text style={[styles.gridLabel, { color: colors.muted2 }]}>LOCATION</Text>
-                  <Text style={[styles.gridValue, { color: colors.text }]}>
-                    {[workModeLabel(team.workMode), team.location].filter(Boolean).join(' · ')}
-                  </Text>
-                </View>
-              ) : null}
-              {team.neededBy ? (
-                <View style={styles.gridCol}>
-                  <Text style={[styles.gridLabel, { color: colors.muted2 }]}>NEEDED BY</Text>
-                  <Text style={[styles.gridValue, { color: colors.text }]}>
-                    {new Date(`${team.neededBy}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </Text>
-                </View>
-              ) : null}
+              ))}
             </View>
           ) : null}
 
           {/* Skill Tags */}
-          {team.roles.length > 0 ? (
+          {team.roles.length > 1 ? (
             <View style={styles.tagsRow}>
-              {team.roles.map((r) => (
+              {team.roles.slice(1).map((r) => (
                 <View key={r} style={styles.tagPill}>
                   <Text style={styles.tagText}>{r.toUpperCase()}</Text>
                 </View>
@@ -122,8 +118,6 @@ export function TeamRequestCard({
 
           {/* Footer Row */}
           <View style={[styles.teamFooterRow, { borderTopColor: colors.cardBorder }]}>
-            {commitment && !owner ? <Text style={[styles.hoursRevText, { color: colors.muted }]}>{commitment}</Text> : null}
-
             {owner ? (
               <View style={styles.ownerRow}>
                 <Pressable
@@ -157,7 +151,7 @@ export function TeamRequestCard({
             <View style={styles.actionBtnsRow}>
               {onPress ? (
                 <Pressable onPress={onPress} style={styles.requestJoinTouch} accessibilityRole="button" accessibilityLabel={`View details of ${team.project}`}>
-                  <CyberCutBox cutSize={6} radius={4} fill="transparent" borderColor="rgba(0, 229, 255, 0.6)" borderWidth={1} style={styles.requestJoinCutBox}>
+                  <CyberCutBox cutSize={6} radius={4} fill="rgba(0, 229, 255, 0.08)" borderColor="rgba(0, 229, 255, 0.7)" borderWidth={1} style={styles.requestJoinCutBox}>
                     <View style={styles.requestJoinInner}>
                       <Text style={[styles.requestJoinText, { color: '#00E5FF' }]}>VIEW DETAILS</Text>
                     </View>
@@ -202,7 +196,7 @@ const styles = StyleSheet.create({
   },
   teamCardInner: {
     padding: 16,
-    gap: 12,
+    gap: 14,
   },
   teamTopBadgesRow: {
     flexDirection: 'row',
@@ -301,7 +295,7 @@ const styles = StyleSheet.create({
   tagsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 8,
   },
   tagPill: {
     backgroundColor: 'rgba(109, 53, 255, 0.18)',
@@ -323,10 +317,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
-    paddingTop: 8,
+    paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
     gap: 8,
+    marginTop: 2,
   },
   hoursRevText: {
     fontFamily: fonts.mono,
@@ -336,18 +331,22 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   actionBtnsRow: {
-    marginLeft: 'auto',
-    flexShrink: 0,
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 10,
   },
   requestJoinTouch: {
-    height: 30,
+    flex: 1,
+    height: 38,
   },
   requestJoinCutBox: {
-    height: 30,
+    height: 38,
+    alignSelf: 'stretch',
   },
+  commitRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  commitChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1 },
+  commitText: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.6 },
   requestJoinInner: {
     height: '100%',
     paddingHorizontal: 10,

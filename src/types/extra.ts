@@ -23,6 +23,11 @@ export type NotificationItem = {
     | { screen: 'BecomeExpert' }
     | { screen: 'MyBookings' }
     | { screen: 'TeamRequestApplicants'; id: string };
+  /** The person this notification is about (a message sender, a connection request, an event
+   * host, ...) — null for system-y notifications with no single person behind them. */
+  actorId: string | null;
+  actorAvatarUri?: string;
+  actorAvatarId?: string;
 };
 
 export type Review = {
@@ -31,6 +36,7 @@ export type Review = {
   reviewerId: string;
   reviewer: string;
   avatarId?: string;
+  avatarUri?: string;
   scores: { gameplay: number; art: number; concept: number; polish: number };
   comment: string;
   upvotes: number;
@@ -45,6 +51,7 @@ export type DemoComment = {
   userId: string;
   userName: string;
   avatarId?: string;
+  avatarUri?: string;
   text: string;
   createdAt: string;
   likes: number;
@@ -106,8 +113,12 @@ export type BookingSummary = {
   status: string;
   expertId: string;
   expertName: string;
+  expertAvatarUri?: string;
+  expertAvatarId?: string;
   expertMeetingLink?: string;
   requesterId: string;
   requesterName: string;
+  requesterAvatarUri?: string;
+  requesterAvatarId?: string;
   role: 'requester' | 'expert';
 };

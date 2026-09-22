@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AvatarRing } from '../avatars/AvatarRing';
+import { CutAvatar } from '../avatars/CutAvatar';
+import { roomAvatarSource } from '../../data/roomAvatar';
 import { fonts, radius, useTheme } from '../../theme';
 import type { Chatroom } from '../../types/chat';
 import { KeyboardAwareScrollView } from '../../components/layout/KeyboardAwareScrollView';
@@ -11,7 +12,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useServerSearch } from '../../hooks/useServerSearch';
 import { listVisibleChatrooms } from '../../services/supabase/chat';
 
-type Target = { id: string; name: string; subtitle: string; avatarId?: string; logo?: Chatroom['logo'] };
+type Target = { id: string; name: string; subtitle: string; kind?: Chatroom['kind']; avatar?: string; avatarId?: string; logo?: Chatroom['logo'] };
 
 export function ForwardSendTo({
   visible,
@@ -41,7 +42,9 @@ export function ForwardSendTo({
           id: r.id,
           name: r.name,
           subtitle: r.lastMessage || r.description,
-          avatarId: r.kind === 'dm' ? r.peerId : undefined,
+          kind: r.kind,
+          avatar: r.avatar,
+          avatarId: r.avatarId,
           logo: r.logo,
         })),
     [rooms, excludeRoomId],
@@ -57,7 +60,7 @@ export function ForwardSendTo({
   );
   const extra: Target[] = (roomSearch.results ?? [])
     .filter((r) => r.id !== excludeRoomId && !rooms.some((x) => x.id === r.id))
-    .map((r) => ({ id: r.id, name: r.name, subtitle: r.lastMessage || r.description, logo: r.logo }));
+    .map((r) => ({ id: r.id, name: r.name, subtitle: r.lastMessage || r.description, kind: r.kind, avatar: r.avatar, avatarId: r.avatarId, logo: r.logo }));
 
   const needle = q.trim().toLowerCase();
   const filter = (list: Target[]) => list.filter((t) => !needle || t.name.toLowerCase().includes(needle) || t.subtitle.toLowerCase().includes(needle));
@@ -74,7 +77,7 @@ export function ForwardSendTo({
     const on = picked.includes(item.id);
     return (
       <Pressable onPress={() => toggle(item.id)} style={styles.row} accessibilityRole="button" accessibilityState={{ selected: on }}>
-        <AvatarRing name={item.name} size={48} avatarId={item.avatarId} />
+        <CutAvatar source={roomAvatarSource(item)} size={48} cut={12} borderWidth={1} />
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.text, fontFamily: fonts.bodySemi }}>{item.name}</Text>
           <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 12 }} numberOfLines={1}>

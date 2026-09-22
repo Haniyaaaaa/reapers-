@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import type { MainStackParamList } from '../../../navigation/types';
 import { PrimaryButton } from '../../../components/buttons/PrimaryButton';
 import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
@@ -10,9 +10,10 @@ import { ScreenHeader } from '../../../components/layout/ScreenHeader';
 import { useAuth } from '../../../hooks/useAuth';
 import { useExpertStore } from '../../../store/expertStore';
 import { colors, fonts } from '../../../theme';
+import { ExpertStatusView } from '../components/ExpertStatusView';
 import { ExpertApplicationFields, type ExpertApplicationValue } from '../components/ExpertApplicationFields';
 
-const EMPTY: ExpertApplicationValue = { role: '', company: '', bio: '', portfolioUrl: '', linkedinUrl: '', tags: [] };
+const EMPTY: ExpertApplicationValue = { role: '', company: '', bio: '', portfolioUrl: '', linkedinUrl: '', tags: [], calUsername: '', calEventSlug: '' };
 
 export function BecomeExpertScreen() {
   const nav = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -40,6 +41,8 @@ export function BecomeExpertScreen() {
       portfolioUrl: myApplication.portfolio_url ?? '',
       linkedinUrl: myApplication.linkedin_url ?? '',
       tags: myApplication.specialties,
+      calUsername: myApplication.cal_username ?? '',
+      calEventSlug: myApplication.cal_event_slug ?? '',
     });
     setEditing(true);
   };
@@ -59,6 +62,8 @@ export function BecomeExpertScreen() {
         specialties: value.tags,
         portfolioUrl: value.portfolioUrl.trim(),
         linkedinUrl: value.linkedinUrl.trim(),
+        calUsername: value.calUsername.trim(),
+        calEventSlug: value.calEventSlug.trim(),
       };
       if (myApplication) {
         await updateExpertProfile(user.id, patch);
@@ -78,26 +83,12 @@ export function BecomeExpertScreen() {
     return (
       <Screen footerPad={false}>
         <ScreenHeader title={myApplication.verified ? 'Expert profile' : 'Become an Expert'} onBack={() => nav.goBack()} />
-        <Text style={styles.p}>
-          {myApplication.verified
-            ? "You're a verified expert — your profile is live in the directory."
-            : myApplication.rejection_reason
-              ? 'Your application was not approved.'
-              : 'Your application is in review. This can take a few days.'}
-        </Text>
-        {!myApplication.verified && myApplication.rejection_reason ? (
-          <Text style={[styles.p, { color: colors.danger }]}>{myApplication.rejection_reason}</Text>
-        ) : null}
-        <Pressable onPress={startEditing} style={styles.editLink} accessibilityRole="button">
-          <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed }}>
-            {!myApplication.verified && myApplication.rejection_reason ? 'Edit & resubmit' : 'Edit profile'}
-          </Text>
-        </Pressable>
-        {myApplication.verified ? (
-          <Pressable onPress={() => nav.navigate('ExpertAvailability')} style={styles.editLink} accessibilityRole="button">
-            <Text style={{ color: colors.cyan, fontFamily: fonts.bodyMed }}>Set availability</Text>
-          </Pressable>
-        ) : null}
+        <ExpertStatusView
+          application={myApplication}
+          onEdit={startEditing}
+          onAvailability={() => nav.navigate('ExpertAvailability')}
+          onViewPublic={() => nav.navigate('ExpertProfile', { id: myApplication.id })}
+        />
       </Screen>
     );
   }
@@ -122,5 +113,4 @@ export function BecomeExpertScreen() {
 
 const styles = StyleSheet.create({
   p: { color: colors.muted, fontFamily: fonts.body, marginBottom: 16 },
-  editLink: { minHeight: 44, justifyContent: 'center', marginTop: 8 },
 });

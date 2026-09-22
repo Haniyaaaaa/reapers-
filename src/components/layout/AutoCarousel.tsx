@@ -35,6 +35,9 @@ export function AutoCarousel<T>({
   const [width, setWidth] = useState(0);
   const [index, setIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
+  // Each page's natural height. The ScrollView takes the *current* page's height, so a short card
+  // isn't followed by blank space just because another slide is taller.
+  const [heights, setHeights] = useState<Record<string, number>>({});
   const count = items.length;
 
   const onLayout = useCallback(
@@ -71,7 +74,15 @@ export function AutoCarousel<T>({
   const pages = useMemo(
     () =>
       items.map((item, i) => (
-        <View key={keyExtractor(item)} style={{ width }}>
+        <View
+          key={keyExtractor(item)}
+          style={{ width, alignSelf: 'flex-start' }}
+          onLayout={(e) => {
+            const h = Math.round(e.nativeEvent.layout.height);
+            const key = keyExtractor(item);
+            setHeights((prev) => (prev[key] === h ? prev : { ...prev, [key]: h }));
+          }}
+        >
           {renderItem(item, i)}
         </View>
       )),
@@ -86,10 +97,13 @@ export function AutoCarousel<T>({
     setIndex(Math.min(Math.max(page, 0), count - 1));
   };
 
+  const currentHeight = count > 0 ? heights[keyExtractor(items[Math.min(index, count - 1)])] : undefined;
+
   return (
     <View>
       <ScrollView
         ref={scrollRef}
+        style={currentHeight ? { height: currentHeight } : undefined}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}

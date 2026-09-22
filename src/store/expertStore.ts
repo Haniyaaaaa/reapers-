@@ -40,12 +40,12 @@ type ExpertState = {
   fetchMyApplication: (userId: string) => Promise<void>;
   applyAsExpert: (
     userId: string,
-    input: { role: string; company: string; bio: string; specialties: string[]; portfolioUrl?: string; linkedinUrl?: string }
+    input: { role: string; company: string; bio: string; specialties: string[]; portfolioUrl?: string; linkedinUrl?: string; calUsername?: string; calEventSlug?: string }
   ) => Promise<void>;
   bookSlot: (expertId: string, requesterId: string, day: string, time: string) => Promise<'ok' | 'conflict' | 'requires_pro'>;
   updateExpertProfile: (
     userId: string,
-    patch: { role?: string; company?: string; bio?: string; specialties?: string[]; portfolioUrl?: string; linkedinUrl?: string }
+    patch: { role?: string; company?: string; bio?: string; specialties?: string[]; portfolioUrl?: string; linkedinUrl?: string; calUsername?: string; calEventSlug?: string }
   ) => Promise<void>;
   setMeetingLink: (bookingId: string, meetingLink: string) => Promise<void>;
   cancelBooking: (bookingId: string) => Promise<void>;
@@ -255,6 +255,8 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
         specialties: input.specialties,
         portfolio_url: input.portfolioUrl || null,
         linkedin_url: input.linkedinUrl || null,
+        cal_username: input.calUsername || null,
+        cal_event_slug: input.calEventSlug || null,
       });
       set({ myApplication: application });
     } catch (err) {
@@ -286,15 +288,17 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
 
   updateExpertProfile: async (userId, patch) => {
     try {
-      const { portfolioUrl, linkedinUrl, ...rest } = patch;
+      const { portfolioUrl, linkedinUrl, calUsername, calEventSlug, ...rest } = patch;
       const application = await expertsApi.updateExpertProfile(userId, {
         ...rest,
         ...(portfolioUrl !== undefined ? { portfolio_url: portfolioUrl || null } : {}),
         ...(linkedinUrl !== undefined ? { linkedin_url: linkedinUrl || null } : {}),
+        ...(calUsername !== undefined ? { cal_username: calUsername || null } : {}),
+        ...(calEventSlug !== undefined ? { cal_event_slug: calEventSlug || null } : {}),
       });
       set((s) => ({
         myApplication: application,
-        experts: s.experts.map((e) => (e.id === userId ? { ...e, ...rest, portfolioUrl, linkedinUrl } : e)),
+        experts: s.experts.map((e) => (e.id === userId ? { ...e, ...rest, portfolioUrl, linkedinUrl, calUsername, calEventSlug } : e)),
       }));
     } catch (err) {
       captureException(err);

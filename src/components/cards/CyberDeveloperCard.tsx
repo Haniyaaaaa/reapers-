@@ -9,8 +9,9 @@ import {
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts } from '../../theme';
 import { CutAvatar } from '../avatars/CutAvatar';
+import { getCyberAvatarSource } from '../../data/cyberAvatars';
 
-const DEFAULT_DEV_AVATAR = require('../../../assets/avatars/extracted/female_10.jpg');
+const DEFAULT_DEV_AVATAR = getCyberAvatarSource(undefined); // the app-wide default avatar, so a user without one looks the same everywhere
 
 interface CyberDeveloperCardProps {
   id: string;

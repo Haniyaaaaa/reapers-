@@ -33,6 +33,8 @@ function expertRowToExpert(row: ExpertRowWithProfile): Expert {
     linkedinUrl: row.linkedin_url ?? undefined,
     portfolioUrl: row.portfolio_url ?? undefined,
     work: row.work ?? undefined,
+    calUsername: row.cal_username ?? undefined,
+    calEventSlug: row.cal_event_slug ?? undefined,
   };
 }
 
@@ -254,12 +256,16 @@ export async function listBookedSlots(expertId: string, windowDays = 60): Promis
  * needs to actually prevent a double-booking race. */
 export async function bookSlot(expertId: string, requesterId: string, startsAt: Date): Promise<'ok' | 'conflict' | 'requires_pro'> {
   const endsAt = new Date(startsAt.getTime() + SESSION_MINUTES * 60 * 1000);
-  const { error } = await supabase.from('bookings').insert({
-    expert_id: expertId,
-    requester_id: requesterId,
-    starts_at: startsAt.toISOString(),
-    ends_at: endsAt.toISOString(),
-  });
+  const { data, error } = await supabase
+    .from('bookings')
+    .insert({
+      expert_id: expertId,
+      requester_id: requesterId,
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+    })
+    .select('id')
+    .single();
   if (error) {
     if (error.code === '23505') return 'conflict';
     // errcode raised by enforce_booking_allowed() (0020_configurable_plan_entitlements.sql) —
@@ -268,12 +274,18 @@ export async function bookSlot(expertId: string, requesterId: string, startsAt: 
     if (error.code === '55007') return 'requires_pro';
     throw error;
   }
+  // Best-effort, fire-and-forget: auto-fills the meeting link via Cal.com if the expert has
+  // one linked (create-cal-booking), same as it always could be set manually afterward if this
+  // doesn't apply or fails — never blocks the booking itself on a third-party API call.
+  if (data?.id) {
+    supabase.functions.invoke('create-cal-booking', { body: { bookingId: data.id } }).catch(() => {});
+  }
   return 'ok';
 }
 
 type BookingRowWithNames = BookingRow & {
-  requester: { display_name: string } | null;
-  expert: { profiles: { display_name: string } | null } | null;
+  requester: { display_name: string; avatar_uri: string | null; avatar_id: string | null } | null;
+  expert: { profiles: { display_name: string; avatar_uri: string | null; avatar_id: string | null } | null } | null;
 };
 
 /** Both directions in one query: sessions this user booked ("My sessions") and, if they're
@@ -286,7 +298,7 @@ export async function listMyBookings(userId: string): Promise<BookingSummary[]> 
   // alongside this direct one.
   const { data, error } = await supabase
     .from('bookings')
-    .select('*, requester:profiles!bookings_requester_id_fkey(display_name), expert:experts(profiles!experts_id_fkey(display_name))')
+    .select('*, requester:profiles!bookings_requester_id_fkey(display_name, avatar_uri, avatar_id), expert:experts(profiles!experts_id_fkey(display_name, avatar_uri, avatar_id))')
     .or(`requester_id.eq.${userId},expert_id.eq.${userId}`)
     .order('starts_at', { ascending: false });
   if (error) throw error;
@@ -296,9 +308,13 @@ export async function listMyBookings(userId: string): Promise<BookingSummary[]> 
     status: row.status,
     expertId: row.expert_id,
     expertName: row.expert?.profiles?.display_name ?? 'Expert',
+    expertAvatarUri: row.expert?.profiles?.avatar_uri ?? undefined,
+    expertAvatarId: row.expert?.profiles?.avatar_id ?? undefined,
     expertMeetingLink: row.meeting_link ?? undefined,
     requesterId: row.requester_id,
     requesterName: row.requester?.display_name ?? 'Someone',
+    requesterAvatarUri: row.requester?.avatar_uri ?? undefined,
+    requesterAvatarId: row.requester?.avatar_id ?? undefined,
     role: row.requester_id === userId ? 'requester' : 'expert',
   }));
 }

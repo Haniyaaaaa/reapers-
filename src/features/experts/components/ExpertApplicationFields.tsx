@@ -9,6 +9,8 @@ export type ExpertApplicationValue = {
   portfolioUrl: string;
   linkedinUrl: string;
   tags: string[];
+  calUsername: string;
+  calEventSlug: string;
 };
 
 type Props = {
@@ -53,6 +55,24 @@ export function ExpertApplicationFields({ value, onChange, bioError, onBioBlur }
         autoCapitalize="none"
         keyboardType="url"
       />
+      <AuthTextField
+        label="Cal.com username"
+        value={value.calUsername}
+        onChangeText={(v) => set('calUsername', v)}
+        placeholder="e.g. janedoe"
+        autoCapitalize="none"
+        hint="Optional — links a Cal.com event so a booking's meeting link is generated automatically instead of you adding one by hand each time."
+      />
+      {value.calUsername.trim() ? (
+        <AuthTextField
+          label="Cal.com event type"
+          value={value.calEventSlug}
+          onChangeText={(v) => set('calEventSlug', v)}
+          placeholder="e.g. 15min"
+          autoCapitalize="none"
+          hint="The slug from your Cal.com event link: cal.com/username/THIS-PART"
+        />
+      ) : null}
       <ChipPicker options={EXPERTISE_TAGS} selected={value.tags} onToggle={(v) => set('tags', value.tags.includes(v) ? value.tags.filter((x) => x !== v) : [...value.tags, v])} />
     </>
   );

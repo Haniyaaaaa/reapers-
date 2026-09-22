@@ -244,8 +244,12 @@ export async function deleteRoom(roomId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Idempotent — same reasoning as joinCommunity (services/supabase/communities.ts): a leftover
+ * or racing membership row shouldn't throw and silently kill the caller's flow. */
 export async function joinRoom(userId: string, roomId: string): Promise<void> {
-  const { error } = await supabase.from('chatroom_members').insert({ chatroom_id: roomId, user_id: userId });
+  const { error } = await supabase
+    .from('chatroom_members')
+    .upsert({ chatroom_id: roomId, user_id: userId }, { onConflict: 'chatroom_id,user_id', ignoreDuplicates: true });
   if (error) throw error;
 }
 

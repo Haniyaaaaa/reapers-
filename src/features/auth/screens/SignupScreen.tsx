@@ -236,7 +236,7 @@ export function SignupScreen() {
                   if (userErr) setUserErr('');
                 }}
                 autoCapitalize="none"
-                placeholder="HiraFatima"
+                placeholder="DanielCarter"
                 error={userErr}
                 onBlur={onUsernameBlur}
                 editable={!submitting}
