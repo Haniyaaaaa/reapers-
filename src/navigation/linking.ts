@@ -2,7 +2,7 @@ import { LinkingOptions } from '@react-navigation/native';
 import type { RootStackParamList } from './types';
 
 export const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: ['reapers://', 'https://reapers.app'],
+  prefixes: ['reapers://', 'https://reapers.pk'],
   config: {
     screens: {
       Splash: 'splash',
@@ -37,6 +37,7 @@ export const linking: LinkingOptions<RootStackParamList> = {
           RoomInvites: 'room-invites',
           RoomJoinRequests: 'chat/:roomId/join-requests',
           SupportTicketDetail: 'support/:id',
+          PostDetail: 'post/:id',
         },
       },
     },

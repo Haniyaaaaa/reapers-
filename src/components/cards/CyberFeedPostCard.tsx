@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Dimensions, Image, ImageSourcePropType, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { LoadMoreButton } from '../feedback/LoadMoreButton';
 import { PostReactionSheet, QuickReactionBar } from '../feed/PostReactionSheet';
+import { PostReactionsViewerSheet } from '../feed/PostReactionsViewerSheet';
 import { resolveAvatarSource } from '../../data/cyberAvatars';
 import { useProfilePreviewStore } from '../../store/profilePreviewStore';
 import { fonts, useTheme } from '../../theme';
@@ -37,6 +38,8 @@ interface CyberFeedPostCardProps {
   onSubmitPhoto: (text: string, localUri: string) => void;
   onToggleReaction: (postId: string, emoji: string) => void;
   onOpenComments: (postId: string) => void;
+  /** Optional — tapping the post body or image opens the full post detail screen. */
+  onPostPress?: (postId: string) => void;
   onShare: (post: FeedPost) => void;
   onReport: (postId: string) => void;
   /** Requests deletion — the caller is expected to confirm before actually deleting. */
@@ -57,6 +60,7 @@ export function CyberFeedPostCard({
   onSubmitPhoto,
   onToggleReaction,
   onOpenComments,
+  onPostPress,
   onShare,
   onReport,
   onDelete,
@@ -72,6 +76,8 @@ export function CyberFeedPostCard({
   const [menuPostId, setMenuPostId] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [zoomedImageUri, setZoomedImageUri] = useState<string | null>(null);
+  const [viewerSheetPostId, setViewerSheetPostId] = useState<string | null>(null);
 
   const startEditingPost = (post: FeedPost) => {
     setEditingPostId(post.id);
@@ -121,16 +127,14 @@ export function CyberFeedPostCard({
       >
         <View style={styles.composerInner}>
           <View style={styles.composerTopRow}>
-            <CyberCutBox
-              cutSize={8}
-              radius={4}
-              fill="rgba(168, 85, 247, 0.2)"
+            <CutAvatar
+              source={userAvatarSource}
+              size={50}
+              cut={8}
               borderColor="rgba(192, 132, 252, 0.35)"
               borderWidth={1}
-              style={styles.composerAvatarWrap}
-            >
-              <Image source={userAvatarSource} style={styles.avatarImg} />
-            </CyberCutBox>
+              fill="rgba(168, 85, 247, 0.2)"
+            />
 
             <View
               style={[
@@ -272,7 +276,11 @@ export function CyberFeedPostCard({
             glass
             style={styles.postCard}
           >
-            <View style={styles.postInner}>
+            <Pressable
+              style={styles.postInner}
+              onPress={() => onPostPress?.(post.id)}
+              disabled={!onPostPress}
+            >
               {/* Header: Author Avatar + Name + Meta */}
               <View style={styles.postHeaderRow}>
                 <Pressable
@@ -381,13 +389,22 @@ export function CyberFeedPostCard({
                     </Pressable>
                   </View>
                 </View>
-              ) : post.content ? (
-                <Text style={[styles.postContentText, { color: colors.text }]}>{post.content}</Text>
-              ) : null}
-
-              {post.mediaUrl ? (
-                <Image source={{ uri: post.mediaUrl }} style={styles.postMedia} resizeMode="cover" />
-              ) : null}
+              ) : (
+                <View style={{ gap: 0 }}>
+                  {post.content ? (
+                    <Text style={[styles.postContentText, { color: colors.text }]}>{post.content}</Text>
+                  ) : null}
+                  {post.mediaUrl ? (
+                    <Pressable
+                      onPress={() => setZoomedImageUri(post.mediaUrl || null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="View full image"
+                    >
+                      <Image source={{ uri: post.mediaUrl }} style={styles.postMedia} resizeMode="cover" />
+                    </Pressable>
+                  ) : null}
+                </View>
+              )}
 
               {post.reactions?.length ? (
                 <View style={styles.reactionChipsRow}>
@@ -395,6 +412,7 @@ export function CyberFeedPostCard({
                     <Pressable
                       key={r.emoji}
                       onPress={() => onToggleReaction(post.id, r.emoji)}
+                      onLongPress={() => setViewerSheetPostId(post.id)}
                       style={[
                         styles.reactionChip,
                         { backgroundColor: light ? 'rgba(15, 23, 42, 0.06)' : 'rgba(255,255,255,0.06)' },
@@ -406,6 +424,36 @@ export function CyberFeedPostCard({
                       </Text>
                     </Pressable>
                   ))}
+                  {(() => {
+                    const topReactions = [...post.reactions].sort((a, b) => b.count - a.count).slice(0, 2);
+                    if (topReactions.length === 0) return null;
+                    return (
+                      <Pressable
+                        onPress={() => setViewerSheetPostId(post.id)}
+                        style={styles.summaryReactionWrap}
+                        accessibilityRole="button"
+                      >
+                        <View style={styles.summaryEmojisOverlap}>
+                          {topReactions.map((r, i) => (
+                            <View
+                              key={r.emoji}
+                              style={[
+                                styles.summaryEmojiCircle,
+                                {
+                                  backgroundColor: light ? '#F8FAFC' : '#1E293B',
+                                  borderColor: light ? '#FFFFFF' : '#0F172A',
+                                  zIndex: 10 - i,
+                                  marginLeft: i > 0 ? -6 : 0,
+                                },
+                              ]}
+                            >
+                              <Text style={styles.summaryEmojiText}>{r.emoji}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </Pressable>
+                    );
+                  })()}
                 </View>
               ) : null}
 
@@ -419,6 +467,7 @@ export function CyberFeedPostCard({
                 <View style={styles.leftActions}>
                   <Pressable
                     onPress={() => onToggleReaction(post.id, '❤️')}
+                    onLongPress={() => setViewerSheetPostId(post.id)}
                     style={styles.actionBtn}
                     accessibilityRole="button"
                   >
@@ -447,7 +496,7 @@ export function CyberFeedPostCard({
                   <Text style={[styles.shareText, { color: colors.muted }]}>Share</Text>
                 </Pressable>
               </View>
-            </View>
+            </Pressable>
           </CyberCutBox>
         ))
       )}
@@ -461,6 +510,32 @@ export function CyberFeedPostCard({
         }}
         onClose={() => setReactionSheetPostId(null)}
       />
+
+      <PostReactionsViewerSheet
+        postId={viewerSheetPostId}
+        onClose={() => setViewerSheetPostId(null)}
+      />
+
+      <Modal visible={!!zoomedImageUri} transparent animationType="fade" onRequestClose={() => setZoomedImageUri(null)}>
+        <View style={styles.imageViewerBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setZoomedImageUri(null)} />
+          <ScrollView
+            contentContainerStyle={styles.imageViewerScrollContent}
+            maximumZoomScale={3}
+            minimumZoomScale={1}
+            centerContent
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+          >
+            <Pressable onPress={() => setZoomedImageUri(null)}>
+              <Image source={{ uri: zoomedImageUri || '' }} style={styles.imageViewerImg} resizeMode="contain" />
+            </Pressable>
+          </ScrollView>
+          <Pressable style={styles.imageViewerCloseBtn} onPress={() => setZoomedImageUri(null)}>
+            <Ionicons name="close" size={28} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -611,6 +686,10 @@ const styles = StyleSheet.create({
   reactionChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)' },
   reactionChipMine: { backgroundColor: 'rgba(0, 229, 255, 0.15)' },
   reactionChipText: { fontFamily: fonts.mono, fontSize: 11, color: '#E2E8F0' },
+  summaryReactionWrap: { flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingVertical: 2, marginLeft: 'auto' },
+  summaryEmojisOverlap: { flexDirection: 'row', alignItems: 'center' },
+  summaryEmojiCircle: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  summaryEmojiText: { fontSize: 11 },
   postFooterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -629,4 +708,8 @@ const styles = StyleSheet.create({
   actionCountText: { fontFamily: fonts.bodySemi, fontSize: 13.5, fontWeight: '600', color: '#E2E8F0' },
   shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   shareText: { fontFamily: fonts.bodySemi, fontSize: 13.5, fontWeight: '600', color: '#E2E8F0' },
+  imageViewerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center' },
+  imageViewerScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  imageViewerImg: { width: Dimensions.get('window').width, height: Dimensions.get('window').height * 0.8 },
+  imageViewerCloseBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 8 },
 });

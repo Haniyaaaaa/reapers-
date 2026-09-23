@@ -55,10 +55,12 @@ export function PostCommentsSheet({
   postId,
   onClose,
   userAvatarSource,
+  inline,
 }: {
   postId: string | null;
   onClose: () => void;
   userAvatarSource: ImageSourcePropType;
+  inline?: boolean;
 }) {
   const { colors, light } = useTheme();
   const isLight = light;
@@ -365,9 +367,8 @@ export function PostCommentsSheet({
     </View>
     );
   };
-
-  return (
-    <Modal visible={!!postId} transparent animationType="slide" onRequestClose={onClose}>
+  const content = (
+    <>
       <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
         <Pressable style={[styles.sheet, { height: SHEET_HEIGHT, backgroundColor: sheetBg, borderColor: sheetBorder, marginBottom: androidKeyboardOffset }]} onPress={() => undefined}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -498,6 +499,251 @@ export function PostCommentsSheet({
           setDeleteCommentId(null);
         }}
       />
+    </>
+  );
+
+  // Inline mode (PostDetailScreen): render as a flat section — no modal, no backdrop,
+  // no fixed-height sheet container. Just the comment list + composer in natural flow.
+  if (inline) {
+    return (
+      <View style={{ flex: 1 }}>
+        <View style={[styles.header, { borderBottomColor: dividerBorder, borderTopWidth: 1, borderTopColor: dividerBorder }]}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Comments</Text>
+        </View>
+
+        <View style={styles.list}>
+          {threaded.length === 0 && !loading ? (
+            <Text style={[styles.emptyText, { color: emptyTextColor }]}>No comments yet — be the first.</Text>
+          ) : (
+            threaded.map(row => (
+              <View key={row.kind === 'toggle' ? `toggle-${row.rootId}` : row.comment.id}>
+                {renderComment({ item: row })}
+              </View>
+            ))
+          )}
+          {hasMore && <LoadMoreButton hasMore={hasMore} onPress={() => postId && loadMoreComments(postId)} />}
+        </View>
+
+        {replyTo ? (
+          <View style={[styles.replyBar, { borderTopColor: dividerBorder, backgroundColor: inputBg }]}>
+            <Ionicons name="arrow-undo" size={13} color={isLight ? colors.primary : '#00E5FF'} />
+            <Text style={[styles.replyBarText, { color: commentTextColor }]} numberOfLines={1}>
+              Replying to <Text style={{ color: commentUserColor, fontFamily: fonts.bodySemi }}>{replyTo.userName}</Text>
+            </Text>
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel reply">
+              <Ionicons name="close" size={16} color={iconColor} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        {posting ? <Text style={[styles.postingText, { color: iconColor }]}>Posting…</Text> : null}
+        {err ? <InlineErrorText message={err} /> : null}
+
+        {tray === 'emoji' ? (
+          <View style={styles.trayWrap}>
+            <EmojiPickerTray onPick={(e) => setText((t) => t + e)} onClose={() => setTray('none')} />
+          </View>
+        ) : null}
+        {tray === 'gif' ? (
+          <View style={styles.trayWrap}>
+            <GifPickerTray onPick={runSendGif} onClose={() => setTray('none')} />
+          </View>
+        ) : null}
+
+        <View style={[styles.composerRow, { borderTopColor: dividerBorder, paddingBottom: Math.max(12, insets.bottom) }]}>
+          <View style={styles.composerAvatarWrap}>
+            <Image source={userAvatarSource} style={styles.composerAvatarImg} />
+          </View>
+          <View style={[styles.inputPill, { backgroundColor: inputBg, borderColor: inputBorder }]}>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              onFocus={() => setTray('none')}
+              placeholder="Add a comment"
+              placeholderTextColor={placeholderColor}
+              style={[styles.textInput, { color: inputTextColor }]}
+              maxLength={1000}
+              onSubmitEditing={runSubmit}
+            />
+          </View>
+          {text.trim() ? (
+            <Pressable onPress={runSubmit} style={styles.sendBtnWrap} accessibilityRole="button" accessibilityLabel="Post comment">
+              <View style={[styles.sendCircle, { backgroundColor: colors.electricAccent }]}>
+                <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
+              </View>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable onPress={() => toggleTray('emoji')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="Emoji">
+                <Ionicons name="happy-outline" size={23} color={tray === 'emoji' ? '#D83CFF' : inputTextColor} />
+              </Pressable>
+              <Pressable onPress={() => toggleTray('gif')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="GIF">
+                <View style={[styles.gifBadge, { borderColor: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>
+                  <Text style={[styles.gifBadgeText, { color: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>GIF</Text>
+                </View>
+              </Pressable>
+            </>
+          )}
+        </View>
+
+        <ConfirmSheet
+          visible={!!reportTarget}
+          title={reportTarget?.type === 'post' ? 'Report this post' : 'Report this comment'}
+          body="Reported content is reviewed by the Reapers team. This doesn't notify the author."
+          confirmLabel="Spam"
+          extraActions={[
+            { label: 'Harassment', onPress: () => submitReportReason('Harassment') },
+            { label: 'Other', onPress: () => submitReportReason('Other') },
+          ]}
+          onClose={() => setReportTarget(null)}
+          onConfirm={() => submitReportReason('Spam')}
+        />
+        <ConfirmSheet
+          visible={!!deleteCommentId}
+          title="Delete this comment?"
+          body="This can't be undone."
+          confirmLabel="Delete"
+          onClose={() => setDeleteCommentId(null)}
+          onConfirm={() => {
+            if (user && postId && deleteCommentId) deleteComment(postId, deleteCommentId, user.id);
+            setDeleteCommentId(null);
+          }}
+        />
+      </View>
+    );
+  }
+
+  // Modal mode (HomeScreen / CommunitiesScreen): full bottom sheet over backdrop
+  return (
+    <Modal visible={!!postId} transparent animationType="slide" onRequestClose={onClose}>
+      <>
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
+          <Pressable style={[styles.sheet, { height: SHEET_HEIGHT, backgroundColor: sheetBg, borderColor: sheetBorder, marginBottom: androidKeyboardOffset }]} onPress={() => undefined}>
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+              <View style={styles.grabberRow}>
+                <View style={[styles.grabber, { backgroundColor: grabberBg }]} />
+              </View>
+
+              <View style={[styles.header, { borderBottomColor: dividerBorder }]}>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Comments</Text>
+                <View style={styles.headerActions}>
+                  {post ? (
+                    <Pressable onPress={() => setReportTarget({ type: 'post', id: post.id })} accessibilityRole="button" hitSlop={8}>
+                      <Ionicons name="flag-outline" size={18} color={iconColor} />
+                    </Pressable>
+                  ) : null}
+                  <Pressable onPress={onClose} accessibilityRole="button" hitSlop={8} style={{ marginLeft: 16 }}>
+                    <Ionicons name="close" size={22} color={iconColor} />
+                  </Pressable>
+                </View>
+              </View>
+
+              {post ? (
+                <View style={[styles.postPreview, { borderBottomColor: dividerBorder }]}>
+                  <Text style={[styles.postAuthor, { color: postAuthorColor }]}>{post.authorName}</Text>
+                  {post.content ? <Text style={[styles.postContent, { color: postContentColor }]}>{post.content}</Text> : null}
+                </View>
+              ) : null}
+
+              <FlatList
+                keyboardShouldPersistTaps="handled"
+                data={threaded}
+                keyExtractor={(row) => (row.kind === 'toggle' ? `toggle-${row.rootId}` : row.comment.id)}
+                renderItem={renderComment}
+                contentContainerStyle={styles.list}
+                ListEmptyComponent={!loading ? <Text style={[styles.emptyText, { color: emptyTextColor }]}>No comments yet — be the first.</Text> : null}
+                ListFooterComponent={<LoadMoreButton hasMore={hasMore} onPress={() => postId && loadMoreComments(postId)} />}
+              />
+
+              {replyTo ? (
+                <View style={[styles.replyBar, { borderTopColor: dividerBorder, backgroundColor: inputBg }]}>
+                  <Ionicons name="arrow-undo" size={13} color={isLight ? colors.primary : '#00E5FF'} />
+                  <Text style={[styles.replyBarText, { color: commentTextColor }]} numberOfLines={1}>
+                    Replying to <Text style={{ color: commentUserColor, fontFamily: fonts.bodySemi }}>{replyTo.userName}</Text>
+                  </Text>
+                  <Pressable onPress={() => setReplyTo(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel reply">
+                    <Ionicons name="close" size={16} color={iconColor} />
+                  </Pressable>
+                </View>
+              ) : null}
+
+              {posting ? <Text style={[styles.postingText, { color: iconColor }]}>Posting…</Text> : null}
+              {err ? <InlineErrorText message={err} /> : null}
+
+              {tray === 'emoji' ? (
+                <View style={styles.trayWrap}>
+                  <EmojiPickerTray onPick={(e) => setText((t) => t + e)} onClose={() => setTray('none')} />
+                </View>
+              ) : null}
+              {tray === 'gif' ? (
+                <View style={styles.trayWrap}>
+                  <GifPickerTray onPick={runSendGif} onClose={() => setTray('none')} />
+                </View>
+              ) : null}
+
+              <View style={[styles.composerRow, { borderTopColor: dividerBorder, paddingBottom: Math.max(12, insets.bottom) }]}>
+                <View style={styles.composerAvatarWrap}>
+                  <Image source={userAvatarSource} style={styles.composerAvatarImg} />
+                </View>
+                <View style={[styles.inputPill, { backgroundColor: inputBg, borderColor: inputBorder }]}>
+                  <TextInput
+                    value={text}
+                    onChangeText={setText}
+                    onFocus={() => setTray('none')}
+                    placeholder="Add a comment"
+                    placeholderTextColor={placeholderColor}
+                    style={[styles.textInput, { color: inputTextColor }]}
+                    maxLength={1000}
+                    onSubmitEditing={runSubmit}
+                  />
+                </View>
+                {text.trim() ? (
+                  <Pressable onPress={runSubmit} style={styles.sendBtnWrap} accessibilityRole="button" accessibilityLabel="Post comment">
+                    <View style={[styles.sendCircle, { backgroundColor: colors.electricAccent }]}>
+                      <Ionicons name="arrow-up" size={18} color="#FFFFFF" />
+                    </View>
+                  </Pressable>
+                ) : (
+                  <>
+                    <Pressable onPress={() => toggleTray('emoji')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="Emoji">
+                      <Ionicons name="happy-outline" size={23} color={tray === 'emoji' ? '#D83CFF' : inputTextColor} />
+                    </Pressable>
+                    <Pressable onPress={() => toggleTray('gif')} style={styles.dockIconBtn} accessibilityRole="button" accessibilityLabel="GIF">
+                      <View style={[styles.gifBadge, { borderColor: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>
+                        <Text style={[styles.gifBadgeText, { color: tray === 'gif' ? '#D83CFF' : inputTextColor }]}>GIF</Text>
+                      </View>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Pressable>
+
+        <ConfirmSheet
+          visible={!!reportTarget}
+          title={reportTarget?.type === 'post' ? 'Report this post' : 'Report this comment'}
+          body="Reported content is reviewed by the Reapers team. This doesn't notify the author."
+          confirmLabel="Spam"
+          extraActions={[
+            { label: 'Harassment', onPress: () => submitReportReason('Harassment') },
+            { label: 'Other', onPress: () => submitReportReason('Other') },
+          ]}
+          onClose={() => setReportTarget(null)}
+          onConfirm={() => submitReportReason('Spam')}
+        />
+        <ConfirmSheet
+          visible={!!deleteCommentId}
+          title="Delete this comment?"
+          body="This can't be undone."
+          confirmLabel="Delete"
+          onClose={() => setDeleteCommentId(null)}
+          onConfirm={() => {
+            if (user && postId && deleteCommentId) deleteComment(postId, deleteCommentId, user.id);
+            setDeleteCommentId(null);
+          }}
+        />
+      </>
     </Modal>
   );
 }

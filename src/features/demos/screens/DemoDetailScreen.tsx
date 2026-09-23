@@ -358,7 +358,7 @@ export function DemoDetailScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out ${demo.title} on Reapers: ${demo.externalUrl || 'https://reapers.gg'}`,
+        message: `Check out ${demo.title} on Reapers!\n\nhttps://reapers.pk/demo/${demo.id}`,
       });
     } catch {
       // Ignored

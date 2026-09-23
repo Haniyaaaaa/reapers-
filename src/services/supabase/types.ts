@@ -1016,7 +1016,7 @@ export type Database = {
       };
       profile_stats: {
         Args: { p_user_id: string };
-        Returns: { connections_count: number; sessions_count: number; communities_count: number }[];
+        Returns: { connections_count: number; sessions_count: number; communities_count: number; events_count: number }[];
       };
       effective_limits: {
         Args: { uid: string };
@@ -1033,6 +1033,14 @@ export type Database = {
       admin_role_breakdown: {
         Args: Record<string, never>;
         Returns: { role: string; count: number }[];
+      };
+      add_dm_peer: {
+        Args: { room_id: string; peer_id: string };
+        Returns: void;
+      };
+      debug_rls: {
+        Args: Record<string, never>;
+        Returns: Json;
       };
     };
   };

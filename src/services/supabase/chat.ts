@@ -202,25 +202,14 @@ export async function getOrCreateDirectMessageRoom(userId: string, otherUserId: 
   }
 
   const room = await createRoom({ name: otherDisplayName, kind: 'dm', is_private: true, created_by: userId });
-  const { error: addErr } = await supabase.from('chatroom_members').insert({ chatroom_id: room.id, user_id: otherUserId });
+  const { error: addErr } = await supabase.rpc('add_dm_peer', { room_id: room.id, peer_id: otherUserId });
   if (addErr) throw addErr;
   return room.id;
 }
 
 export async function createRoom(input: ChatroomInsert): Promise<Chatroom> {
   const { data, error } = await supabase.from('chatrooms').insert(input).select().single();
-  if (error) {
-    // TEMP DIAGNOSTIC — remove once the chatrooms RLS 42501 is root-caused. Folds the
-    // comparison directly into the thrown error so it shows up in the same captureException
-    // output already being copied, instead of a separate console.log that's easy to miss.
-    if (error.code === '42501') {
-      const { data: authUser } = await supabase.auth.getUser();
-      throw new Error(
-        `${error.message} [diagnostic: created_by_sent=${input.created_by} session_user_id=${authUser?.user?.id ?? 'null'} kind=${input.kind}]`,
-      );
-    }
-    throw error;
-  }
+  if (error) throw error;
   // The auto-join trigger has already inserted the creator's membership row by now.
   const { data: membership } = await supabase
     .from('chatroom_members')
@@ -258,8 +247,8 @@ export async function deleteRoom(roomId: string): Promise<void> {
 export async function joinRoom(userId: string, roomId: string): Promise<void> {
   const { error } = await supabase
     .from('chatroom_members')
-    .upsert({ chatroom_id: roomId, user_id: userId }, { onConflict: 'chatroom_id,user_id', ignoreDuplicates: true });
-  if (error) throw error;
+    .insert({ chatroom_id: roomId, user_id: userId });
+  if (error && error.code !== '23505') throw error;
 }
 
 // ---------------------------------------------------------------------------

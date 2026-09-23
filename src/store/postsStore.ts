@@ -27,6 +27,8 @@ type PostsState = {
   fetchMyPosts: (userId: string) => Promise<void>;
   loadMoreMyPosts: (userId: string) => Promise<void>;
 
+  postsById: Record<string, FeedPost>;
+  fetchPost: (postId: string, myUserId: string) => Promise<void>;
   fetchFeed: (myUserId: string, opts?: FetchOpts) => Promise<void>;
   loadMorePosts: (myUserId: string) => Promise<void>;
   checkForNewPosts: () => Promise<void>;
@@ -46,6 +48,7 @@ type PostsState = {
 };
 
 export const usePostsStore = create<PostsState>((set, get) => ({
+  postsById: {},
   posts: [],
   hasMore: false,
   loading: false,
@@ -86,6 +89,17 @@ export const usePostsStore = create<PostsState>((set, get) => ({
     }
   },
 
+
+  fetchPost: async (postId, myUserId) => {
+    try {
+      const post = await postsApi.getPost(postId, myUserId);
+      if (post) {
+        set((s) => ({ postsById: { ...s.postsById, [postId]: post } }));
+      }
+    } catch (err) {
+      captureException(err);
+    }
+  },
   fetchFeed: (myUserId, opts) =>
     swr(
       `feed:${myUserId}`,

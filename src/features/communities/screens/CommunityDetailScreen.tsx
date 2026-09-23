@@ -155,7 +155,7 @@ export function CommunityDetailScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Join ${community.name} (${community.shortName}) on Reapers! ${community.description}`,
+        message: `Join ${community.name} (${community.shortName}) on Reapers! ${community.description}\n\nhttps://reapers.pk/communities/${community.id}`,
       });
     } catch {}
   };

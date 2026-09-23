@@ -130,7 +130,7 @@ export function ProfileScreen() {
 
   const portfolioOwnerId = isOwn ? user?.id : params?.id;
 
-  const [stats, setStats] = useState<ProfileStats>({ connections: 0, sessions: 0, communities: 0 });
+  const [stats, setStats] = useState<ProfileStats>({ connections: 0, sessions: 0, communities: 0, events: 0 });
   // Refetch on focus: connections get accepted and sessions end while this screen stays mounted.
   useFocusEffect(
     useCallback(() => {
@@ -258,7 +258,7 @@ export function ProfileScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out ${profile?.displayName ?? 'this developer'}'s profile on Reapers!`,
+        message: `Check out ${profile?.displayName ?? 'this developer'}'s profile on Reapers!\n\nhttps://reapers.pk/profile/${params?.id || ''}`,
       });
     } catch {}
   };
@@ -440,53 +440,87 @@ export function ProfileScreen() {
           </View>
         </View>
 
-        {/* 2. STATS 4-TILE ROW */}
-        <View style={styles.statsGridRow}>
-          <CyberCutBox
-            cutSize={8}
-            radius={6}
-            fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
-            style={styles.statTileCut}
-          >
-            <View style={styles.statTileInner}>
-              <Ionicons name="videocam-outline" size={16} color={colors.cyan} />
-              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.sessions.toLocaleString()}</Text>
-              <Text style={[styles.statLabelText, { color: colors.muted }]}>SESSIONS</Text>
-            </View>
-          </CyberCutBox>
+        {/* 2. STATS 3-TILE ROW — tappable, role-aware */}
+        {(() => {
+          const roles: string[] = profile?.roles ?? [];
+          // First tile: experts see Sessions → MyBookings; gamers/devs see Events → MyEvents
+          const firstTileIcon = isExpert ? 'videocam-outline' : 'megaphone-outline';
+          const firstTileLabel = isExpert ? 'SESSIONS' : 'EVENTS';
+          const firstTileCount = isExpert ? stats.sessions : stats.events;
+          const firstTileColor = isExpert ? colors.cyan : '#3DDC84';
+          const handleFirstTile = () => {
+            if (!isOwn) return;
+            if (isExpert) nav.navigate('MyBookings');
+            else nav.navigate('MyEvents');
+          };
+          return (
+            <View style={styles.statsGridRow}>
+              {/* Tile 1: Sessions (expert) or Events (gamer/dev) */}
+              <Pressable onPress={handleFirstTile} disabled={!isOwn} style={styles.statTilePressable} accessibilityRole="button">
+                <CyberCutBox
+                  cutSize={8}
+                  radius={6}
+                  fill={colors.cardFill}
+                  borderColor={colors.cardBorder}
+                  borderWidth={0.88}
+                  style={styles.statTileCut}
+                >
+                  <View style={styles.statTileInner}>
+                    <Ionicons name={firstTileIcon} size={16} color={firstTileColor} />
+                    <Text style={[styles.statNumText, { color: colors.text }]}>{firstTileCount.toLocaleString()}</Text>
+                    <Text style={[styles.statLabelText, { color: colors.muted }]}>{firstTileLabel}</Text>
+                  </View>
+                </CyberCutBox>
+              </Pressable>
 
-          <CyberCutBox
-            cutSize={8}
-            radius={6}
-            fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
-            style={styles.statTileCut}
-          >
-            <View style={styles.statTileInner}>
-              <Ionicons name="people-outline" size={16} color="#6D9BFF" />
-              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.communities.toLocaleString()}</Text>
-              <Text style={[styles.statLabelText, { color: colors.muted }]}>COMMUNITIES</Text>
-            </View>
-          </CyberCutBox>
+              {/* Tile 2: Communities joined */}
+              <Pressable
+                onPress={() => { if (isOwn) nav.navigate('Tabs', { screen: 'CommunitiesTab' }); }}
+                disabled={!isOwn}
+                style={styles.statTilePressable}
+                accessibilityRole="button"
+              >
+                <CyberCutBox
+                  cutSize={8}
+                  radius={6}
+                  fill={colors.cardFill}
+                  borderColor={colors.cardBorder}
+                  borderWidth={0.88}
+                  style={styles.statTileCut}
+                >
+                  <View style={styles.statTileInner}>
+                    <Ionicons name="people-outline" size={16} color="#6D9BFF" />
+                    <Text style={[styles.statNumText, { color: colors.text }]}>{stats.communities.toLocaleString()}</Text>
+                    <Text style={[styles.statLabelText, { color: colors.muted }]}>COMMUNITIES</Text>
+                  </View>
+                </CyberCutBox>
+              </Pressable>
 
-          <CyberCutBox
-            cutSize={8}
-            radius={6}
-            fill={colors.cardFill}
-            borderColor={colors.cardBorder}
-            borderWidth={0.88}
-            style={styles.statTileCut}
-          >
-            <View style={styles.statTileInner}>
-              <Ionicons name="git-network-outline" size={16} color="#D83CFF" />
-              <Text style={[styles.statNumText, { color: colors.text }]}>{stats.connections.toLocaleString()}</Text>
-              <Text style={[styles.statLabelText, { color: colors.muted }]}>CONNECTIONS</Text>
+              {/* Tile 3: Connections → Connections screen */}
+              <Pressable
+                onPress={() => { if (isOwn) nav.navigate('Connections'); }}
+                disabled={!isOwn}
+                style={styles.statTilePressable}
+                accessibilityRole="button"
+              >
+                <CyberCutBox
+                  cutSize={8}
+                  radius={6}
+                  fill={colors.cardFill}
+                  borderColor={colors.cardBorder}
+                  borderWidth={0.88}
+                  style={styles.statTileCut}
+                >
+                  <View style={styles.statTileInner}>
+                    <Ionicons name="git-network-outline" size={16} color="#D83CFF" />
+                    <Text style={[styles.statNumText, { color: colors.text }]}>{stats.connections.toLocaleString()}</Text>
+                    <Text style={[styles.statLabelText, { color: colors.muted }]}>CONNECTIONS</Text>
+                  </View>
+                </CyberCutBox>
+              </Pressable>
             </View>
-          </CyberCutBox>
-        </View>
+          );
+        })()}
 
         {/* 3. ABOUT / BIO GLASS CARD */}
         {!editing ? (
@@ -992,6 +1026,9 @@ const styles = StyleSheet.create({
   statTileCut: {
     flex: 1,
     height: 84,
+  },
+  statTilePressable: {
+    flex: 1,
   },
   statTileInner: {
     width: '100%',

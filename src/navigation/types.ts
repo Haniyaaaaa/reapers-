@@ -34,6 +34,7 @@ export type MainStackParamList = {
   PeopleList: undefined;
   Profile: { id?: string };
   Settings: undefined;
+  PostDetail: { id: string };
   Notifications: undefined;
   Communities: undefined;
   CommunityDetail: { id: string };

@@ -215,3 +215,37 @@ export async function deleteComment(id: string, userId: string): Promise<void> {
   const { error } = await supabase.from('post_comments').delete().eq('id', id).eq('user_id', userId);
   if (error) throw error;
 }
+
+export async function getPost(id: string, myUserId: string): Promise<FeedPost | null> {
+  const { data, error } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const hydrated = await hydratePosts([data], myUserId);
+  return hydrated[0] ?? null;
+}
+
+export interface ReactionDetail {
+  userId: string;
+  emoji: string;
+  userName: string;
+  avatarUri?: string;
+  avatarId?: string;
+}
+
+export async function getPostReactionsDetail(postId: string): Promise<ReactionDetail[]> {
+  const { data, error } = await supabase
+    .from('post_reactions')
+    .select('user_id, emoji, profiles(display_name, avatar_uri, avatar_id)')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  
+  return (data || []).map((row: any) => ({
+    userId: row.user_id,
+    emoji: row.emoji,
+    userName: row.profiles?.display_name ?? 'Someone',
+    avatarUri: row.profiles?.avatar_uri ?? undefined,
+    avatarId: row.profiles?.avatar_id ?? undefined,
+  }));
+}
