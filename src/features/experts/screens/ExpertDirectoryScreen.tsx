@@ -16,6 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import type { MainStackParamList, TabParamList } from '../../../navigation/types';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { CyberTabPill } from '../../../components/cyber/CyberTabPill';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
 import { ExpertListCard } from '../../../components/cards/ExpertListCard';
 import { EmptyState } from '../../../components/feedback/EmptyState';
@@ -173,41 +174,11 @@ export function ExpertDirectoryScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterChipsRow}
       >
-        {FILTERS.map((item) => {
-          const active = filter === item;
-          return (
-            <Pressable
-              key={item}
-              onPress={() => setFilter(item)}
-              style={styles.chipPressable}
-              accessibilityRole="button"
-            >
-              {active ? (
-                <LinearGradient
-                  colors={['#00F0FF', '#7928CA', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.activeChipGradient}
-                >
-                  <Text style={styles.activeChipText}>{item.toUpperCase()}</Text>
-                </LinearGradient>
-              ) : (
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill={colors.cardFill}
-                  borderColor={colors.cardBorder}
-                  borderWidth={1}
-                  style={styles.inactiveChipCut}
-                >
-                  <View style={styles.inactiveChipInner}>
-                    <Text style={[styles.inactiveChipText, { color: colors.muted }]}>{item.toUpperCase()}</Text>
-                  </View>
-                </CyberCutBox>
-              )}
-            </Pressable>
-          );
-        })}
+        {FILTERS.map((item) => (
+          <View key={item} style={styles.chipPressable}>
+            <CyberTabPill label={item.toUpperCase()} active={filter === item} onPress={() => setFilter(item)} />
+          </View>
+        ))}
       </KeyboardAwareScrollView>
 
       {/* Section 1: Top Rated / Expert of the Week */}
@@ -287,22 +258,10 @@ export function ExpertDirectoryScreen() {
                     style={styles.book15Touch}
                     accessibilityRole="button"
                   >
-                    <CyberCutBox
-                      cutSize={8}
-                      radius={4}
-                      fill="transparent"
-                      borderColor="rgba(0, 240, 255, 0.6)"
-                      borderWidth={1}
-                      style={styles.book15CutBox}
-                    >
-                      <LinearGradient
-                        colors={['#00F0FF', '#7928CA', '#D83CFF']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.book15Gradient}
-                      >
+                    <CyberCutBox gradient cutSize={8} radius={4} style={styles.book15CutBox}>
+                      <View style={styles.book15Gradient}>
                         <Text style={styles.book15Text}>Book 15 min</Text>
-                      </LinearGradient>
+                      </View>
                     </CyberCutBox>
                   </Pressable>
                 </View>

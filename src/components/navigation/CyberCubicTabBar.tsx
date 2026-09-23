@@ -347,15 +347,13 @@ export function CyberCubicTabBar({ state, navigation, descriptors }: BottomTabBa
             />
           </Animated.View>
 
-          {/* Gyroscopically Stabilized Center Icon */}
-          <Animated.View
-            style={[
-              styles.gyroIconWrap,
-              {
-                transform: [{ rotate: iconCounterRotate }],
-              },
-            ]}
-          >
+          {/* Center icon — a sibling of the rotating diamond behind it, not nested inside it,
+              so it never inherits that rotation in the first place. It used to carry its own
+              "counter-rotation" here as if it needed to cancel one out, which instead spun it
+              to upside-down on whichever tab sits next to Home (±180°, an odd multiple of the
+              diamond's own roll) — this is why iconCounterRotate is now unused rather than
+              applied. */}
+          <Animated.View style={styles.gyroIconWrap}>
             <Ionicons
               name={activeConfig?.activeIcon || 'grid'}
               size={22}

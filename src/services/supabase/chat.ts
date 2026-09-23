@@ -239,6 +239,15 @@ export async function updateRoom(roomId: string, patch: { name?: string; descrip
   if (error) throw error;
 }
 
+/** Keeps a community's chatroom avatar in sync with the community's own logo — the two are
+ * separate rows (chatrooms.avatar_url vs communities.logo_url), so without this a community's
+ * real picture never reaches its own chatroom row, which falls back to a generic per-name
+ * mascot avatar instead (the mismatch between a community's page and its chat list row). */
+export async function updateRoomAvatarByCommunity(communityId: string, avatarUrl: string | undefined): Promise<void> {
+  const { error } = await supabase.from('chatrooms').update({ avatar_url: avatarUrl ?? null }).eq('community_id', communityId);
+  if (error) throw error;
+}
+
 export async function deleteRoom(roomId: string): Promise<void> {
   const { error } = await supabase.from('chatrooms').delete().eq('id', roomId);
   if (error) throw error;

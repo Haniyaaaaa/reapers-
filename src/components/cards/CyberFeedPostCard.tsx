@@ -5,6 +5,7 @@ import { CyberCutBox } from '../cyber/CyberCutBox';
 import { LoadMoreButton } from '../feedback/LoadMoreButton';
 import { PostReactionSheet, QuickReactionBar } from '../feed/PostReactionSheet';
 import { resolveAvatarSource } from '../../data/cyberAvatars';
+import { useProfilePreviewStore } from '../../store/profilePreviewStore';
 import { fonts, useTheme } from '../../theme';
 import type { FeedPost } from '../../types/post';
 import { CutAvatar } from '../avatars/CutAvatar';
@@ -274,22 +275,29 @@ export function CyberFeedPostCard({
             <View style={styles.postInner}>
               {/* Header: Author Avatar + Name + Meta */}
               <View style={styles.postHeaderRow}>
-                <CutAvatar
-                  source={resolveAvatarSource(post.authorAvatarUri, post.authorAvatarId)}
-                  size={50}
-                  cut={11}
-                  borderColor="rgba(192, 132, 252, 0.35)"
-                  borderWidth={1}
-                  fill="rgba(168, 85, 247, 0.2)"
-                />
+                <Pressable
+                  onPress={() => useProfilePreviewStore.getState().open(post.userId)}
+                  style={styles.postAuthorTouch}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${post.authorName}'s profile`}
+                >
+                  <CutAvatar
+                    source={resolveAvatarSource(post.authorAvatarUri, post.authorAvatarId)}
+                    size={50}
+                    cut={11}
+                    borderColor="rgba(192, 132, 252, 0.35)"
+                    borderWidth={1}
+                    fill="rgba(168, 85, 247, 0.2)"
+                  />
 
-                <View style={styles.postAuthorInfo}>
-                  <Text style={[styles.authorName, { color: colors.text }]}>{post.authorName}</Text>
-                  <Text style={[styles.postMeta, { color: colors.muted }]}>
-                    {timeAgo(post.createdAt)} ago
-                    {post.activityTag ? ` · 📍 ${post.activityTag}` : ''}
-                  </Text>
-                </View>
+                  <View style={styles.postAuthorInfo}>
+                    <Text style={[styles.authorName, { color: colors.text }]}>{post.authorName}</Text>
+                    <Text style={[styles.postMeta, { color: colors.muted }]}>
+                      {timeAgo(post.createdAt)} ago
+                      {post.activityTag ? ` · 📍 ${post.activityTag}` : ''}
+                    </Text>
+                  </View>
+                </Pressable>
 
                 <View style={styles.menuAnchor}>
                   <Pressable
@@ -547,6 +555,7 @@ const styles = StyleSheet.create({
   postCard: { width: '100%', padding: 16 },
   postInner: { width: '100%' },
   postHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  postAuthorTouch: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   postAvatarBox: { width: 50, height: 50, overflow: 'hidden' },
   postAuthorInfo: { flex: 1, justifyContent: 'center' },
   authorName: { fontFamily: fonts.display, fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2 },

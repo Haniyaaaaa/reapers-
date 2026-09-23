@@ -124,6 +124,7 @@ export const useCommunitiesStore = create<CommunitiesState>((set, get) => ({
         community_id: community.id,
         is_private: false,
         created_by: input.createdBy,
+        avatar_url: community.logoUrl,
       });
       const joined = { ...community, joined: true, memberCount: 1 };
       set((s) => ({ communities: [joined, ...s.communities] }));
@@ -143,6 +144,7 @@ export const useCommunitiesStore = create<CommunitiesState>((set, get) => ({
           c.id === id ? { ...c, name: updated.name, description: updated.description, location: updated.location, logo: updated.logo, logoUrl: updated.logoUrl, tags: updated.tags } : c,
         ),
       }));
+      if (patch.logoUrl !== undefined) await chatApi.updateRoomAvatarByCommunity(id, updated.logoUrl);
     } catch (err) {
       if (prev) set((s) => ({ communities: s.communities.map((c) => (c.id === id ? prev : c)) }));
       captureException(err);

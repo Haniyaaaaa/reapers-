@@ -507,7 +507,12 @@ export function EventDetailScreen() {
 
         <View style={[styles.mainBody, { maxWidth: CONTENT_MAX_WIDTH }]}>
           {/* ================= 2. ORGANISED BY ================= */}
-          <View style={styles.organisedByRow}>
+          <Pressable
+            onPress={() => useProfilePreviewStore.getState().open(event.hostId)}
+            style={styles.organisedByRow}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${event.posterName || 'the host'}'s profile`}
+          >
             <CutAvatar
               source={resolveAvatarSource(event.posterAvatarUri, event.posterAvatarId)}
               size={48}
@@ -526,7 +531,7 @@ export function EventDetailScreen() {
                 </View>
               </View>
             </View>
-          </View>
+          </Pressable>
 
           {/* ================= 3. LOGISTICS CHAMFER CARD ================= */}
           <CyberCutBox

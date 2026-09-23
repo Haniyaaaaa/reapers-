@@ -1,7 +1,7 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+
 import { openExternalUrl } from '../../utils/openUrl';
 import { EXPERT_GOLD, ExpertTick } from '../experts/ExpertBadge';
-import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { resolveAvatarSource } from '../../data/cyberAvatars';
@@ -85,32 +85,32 @@ export function ExpertListCard({ expert, sessionCount, onPress }: { expert: Expe
 
               <Pressable onPress={onPress} style={styles.bookTouch} accessibilityRole="button">
                 <CyberCutBox
+                  gradient
                   cutSize={6}
                   radius={4}
-                  fill="transparent"
                   borderColor={isLight ? colors.electricAccent : 'rgba(0, 240, 255, 0.6)'}
                   borderWidth={1}
                   style={styles.bookCutBox}
                 >
-                  <LinearGradient colors={gradients.cyber} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.bookGradient}>
+                  <View style={styles.bookGradient}>
                     <Text style={styles.bookText}>Book</Text>
-                  </LinearGradient>
+                  </View>
                 </CyberCutBox>
               </Pressable>
             </View>
           ) : (
             <Pressable onPress={onPress} style={[styles.bookTouch, { alignSelf: 'flex-end' }]} accessibilityRole="button">
               <CyberCutBox
+                gradient
                 cutSize={6}
                 radius={4}
-                fill="transparent"
                 borderColor={isLight ? colors.electricAccent : 'rgba(0, 240, 255, 0.6)'}
                 borderWidth={1}
                 style={styles.bookCutBox}
               >
-                <LinearGradient colors={gradients.cyber} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.bookGradient}>
+                <View style={styles.bookGradient}>
                   <Text style={styles.bookText}>Book</Text>
-                </LinearGradient>
+                </View>
               </CyberCutBox>
             </Pressable>
           )}

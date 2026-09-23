@@ -15,6 +15,7 @@ import type { MainStackParamList } from '../../../navigation/types';
 import { CyberDeveloperCard } from '../../../components/cards/CyberDeveloperCard';
 import { CyberBackground } from '../../../components/cyber/CyberBackground';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { CyberTabPill } from '../../../components/cyber/CyberTabPill';
 import { TeamFilterSheet } from '../../../components/network/TeamFilterSheet';
 import { EMPTY_TEAM_FILTERS, teamFilterCount, teamFiltersToApi, type TeamFilterSelection } from '../../../utils/teamRequest';
 import { CyberSeeAllButton } from '../../../components/cyber/CyberSeeAllButton';
@@ -241,41 +242,11 @@ export function NetworkScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterChipsRow}
       >
-        {FILTERS.map((item) => {
-          const active = filter === item;
-          return (
-            <Pressable
-              key={item}
-              onPress={() => setFilter(item)}
-              style={styles.chipPressable}
-              accessibilityRole="button"
-            >
-              {active ? (
-                <LinearGradient
-                  colors={['#00F0FF', '#7928CA', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.activeChipGradient}
-                >
-                  <Text style={styles.activeChipText}>{item}</Text>
-                </LinearGradient>
-              ) : (
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill={colors.cardFill}
-                  borderColor={colors.cardBorder}
-                  borderWidth={1}
-                  style={styles.inactiveChipCut}
-                >
-                  <View style={styles.inactiveChipInner}>
-                    <Text style={[styles.inactiveChipText, { color: colors.muted }]}>{item}</Text>
-                  </View>
-                </CyberCutBox>
-              )}
-            </Pressable>
-          );
-        })}
+        {FILTERS.map((item) => (
+          <View key={item} style={styles.chipPressable}>
+            <CyberTabPill label={item} active={filter === item} onPress={() => setFilter(item)} />
+          </View>
+        ))}
       </KeyboardAwareScrollView>
 
       {/* Section 1: Open Team Requests */}

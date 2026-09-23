@@ -4,7 +4,7 @@
     "slug": "reapers",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/launcher_icon.png",
     "scheme": "reapers",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [

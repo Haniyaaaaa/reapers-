@@ -181,6 +181,7 @@ function commentRowToComment(row: PostCommentRow, author: AuthorRow | undefined)
     avatarUri: author?.avatar_uri ?? undefined,
     text: row.text,
     createdAt: row.created_at,
+    parentId: row.parent_id ?? undefined,
   };
 }
 
@@ -198,8 +199,8 @@ export async function listComments(postId: string, opts?: { before?: string; lim
   return { rows: rows.map((r) => commentRowToComment(r, authors.get(r.user_id))), hasMore: rows.length === limit };
 }
 
-export async function addComment(postId: string, userId: string, text: string): Promise<PostComment> {
-  const { data, error } = await supabase.from('post_comments').insert({ post_id: postId, user_id: userId, text }).select().single();
+export async function addComment(postId: string, userId: string, text: string, parentId?: string): Promise<PostComment> {
+  const { data, error } = await supabase.from('post_comments').insert({ post_id: postId, user_id: userId, text, parent_id: parentId ?? null }).select().single();
   if (error) throw error;
   const authors = await resolveAuthors([userId]);
   return commentRowToComment(data, authors.get(userId));

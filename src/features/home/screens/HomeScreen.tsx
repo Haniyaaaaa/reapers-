@@ -864,7 +864,18 @@ export function HomeScreen() {
             }}
             onToggleReaction={(postId, emoji) => user && reactToPost(postId, emoji, user.id)}
             onOpenComments={(postId) => setCommentsPostId(postId)}
-            onShare={(post) => Share.share({ message: post.content || 'Check this out on Reapers' })}
+            onShare={(post) => {
+              // Share.share's `url` field only actually attaches media on iOS (RN's own
+              // limitation) — folding the media link into the message text is what actually
+              // carries it through on Android too, same as EventDetailScreen/DemoDetailScreen's
+              // own share text already does for their own media/links.
+              const parts = [
+                `${post.authorName} on Reapers:`,
+                post.content || (post.kind === 'photo' ? 'Shared a photo' : 'Shared an update'),
+                post.mediaUrl,
+              ].filter(Boolean);
+              Share.share({ message: parts.join('\n\n'), url: post.mediaUrl });
+            }}
             onReport={(postId) => setReportPostId(postId)}
             onDelete={(postId) => setDeletePostId(postId)}
             onEdit={(postId, content) => user && editPostAction(postId, user.id, content)}

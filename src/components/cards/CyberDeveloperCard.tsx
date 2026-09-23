@@ -45,7 +45,7 @@ export function CyberDeveloperCard({
         radius={6}
         gradient
         gradientDiagonal
-        gradientColors={['#8A2BE2', '#6D35FF', '#C026D3']}
+        gradientColors={['#D83CFF', '#AD30CC', '#822499']}
         style={styles.cutCard}
       >
         <View style={styles.gradientCard}>

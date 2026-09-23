@@ -248,15 +248,10 @@ export function CommunitiesScreen() {
               accessibilityRole="button"
               accessibilityLabel="Create community"
             >
-              <CyberCutBox cutSize={8} radius={4} style={styles.createCutBox}>
-                <LinearGradient
-                  colors={['#00E5FF', '#6D35FF', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.createGradient}
-                >
+              <CyberCutBox gradient cutSize={8} radius={4} style={styles.createCutBox}>
+                <View style={styles.createGradient}>
                   <Text style={styles.createBtnText}>+ Create</Text>
-                </LinearGradient>
+                </View>
               </CyberCutBox>
             </Pressable>
           </View>
@@ -298,15 +293,10 @@ export function CommunitiesScreen() {
               accessibilityRole="button"
               accessibilityLabel={filterCount > 0 ? `Filter communities, ${filterCount} active` : 'Filter communities'}
             >
-              <CyberCutBox cutSize={8} radius={4} style={styles.filterCutBox}>
-                <LinearGradient
-                  colors={['#00E5FF', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.filterGradient}
-                >
+              <CyberCutBox gradient gradientDiagonal cutSize={8} radius={4} style={styles.filterCutBox}>
+                <View style={styles.filterGradient}>
                   <Ionicons name="options-outline" size={18} color="#FFFFFF" />
-                </LinearGradient>
+                </View>
               </CyberCutBox>
               {filterCount > 0 ? (
                 <View style={styles.filterBadge}>

@@ -135,6 +135,20 @@ export async function connectPerson(myUserId: string, otherUserId: string): Prom
   }
 }
 
+/** Undo — a request I sent and the other person hasn't answered yet. RLS
+ * (connections_delete_participant) already lets either side delete a row they're part of,
+ * pending or not; this only ever targets one still in 'pending' so it can't accidentally
+ * remove an already-accepted connection. */
+export async function cancelConnectionRequest(myUserId: string, otherUserId: string): Promise<void> {
+  const { error } = await supabase
+    .from('connections')
+    .delete()
+    .eq('requester_id', myUserId)
+    .eq('addressee_id', otherUserId)
+    .eq('status', 'pending');
+  if (error) throw error;
+}
+
 export type ConnectionSummary = {
   otherId: string;
   otherName: string;

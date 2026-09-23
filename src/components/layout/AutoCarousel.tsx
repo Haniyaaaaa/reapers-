@@ -35,8 +35,9 @@ export function AutoCarousel<T>({
   const [width, setWidth] = useState(0);
   const [index, setIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
-  // Each page's natural height. The ScrollView takes the *current* page's height, so a short card
-  // isn't followed by blank space just because another slide is taller.
+  // Each page's natural height. The ScrollView takes the *tallest* measured page's height, so
+  // whatever sits below the carousel stays put instead of shifting up and down every time the
+  // auto-advance (or a manual swipe) lands on a shorter or taller card.
   const [heights, setHeights] = useState<Record<string, number>>({});
   const count = items.length;
 
@@ -97,13 +98,14 @@ export function AutoCarousel<T>({
     setIndex(Math.min(Math.max(page, 0), count - 1));
   };
 
-  const currentHeight = count > 0 ? heights[keyExtractor(items[Math.min(index, count - 1)])] : undefined;
+  const measured = Object.values(heights);
+  const maxHeight = measured.length > 0 ? Math.max(...measured) : undefined;
 
   return (
     <View>
       <ScrollView
         ref={scrollRef}
-        style={currentHeight ? { height: currentHeight } : undefined}
+        style={maxHeight ? { height: maxHeight } : undefined}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}

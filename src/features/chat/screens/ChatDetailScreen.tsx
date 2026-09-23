@@ -646,16 +646,40 @@ export function ChatDetailScreen() {
               onLongPress={() => !item.deleted && setActive(item)}
               style={[styles.msgRow, isMine ? styles.msgRowMine : styles.msgRowOther]}
             >
-              {/* Other User Avatar */}
+              {/* Other User Avatar — opens their profile, same as tapping their name does
+                  (both need to stop the tap reaching the row's own onPress, which opens the
+                  message action sheet instead). */}
               {!isMine && (
-                <CutAvatar source={resolveAvatarSource(item.senderAvatar, item.senderAvatarId)} size={36} cut={9} borderWidth={1} fill="#161B2E" />
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    useProfilePreviewStore.getState().open(item.senderId);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${item.senderName}'s profile`}
+                >
+                  <CutAvatar source={resolveAvatarSource(item.senderAvatar, item.senderAvatarId)} size={36} cut={9} borderWidth={1} fill="#161B2E" />
+                </Pressable>
               )}
 
               {/* Message Content Container */}
               <View style={[styles.msgContentCol, isMine && { alignItems: 'flex-end' }]}>
                 {/* Sender Header Line */}
                 <View style={styles.senderHeaderLine}>
-                  <Text style={[styles.senderNameText, { color: colors.text }]}>{item.senderName}</Text>
+                  {isMine ? (
+                    <Text style={[styles.senderNameText, { color: colors.text }]}>{item.senderName}</Text>
+                  ) : (
+                    <Pressable
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        useProfilePreviewStore.getState().open(item.senderId);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${item.senderName}'s profile`}
+                    >
+                      <Text style={[styles.senderNameText, { color: colors.text }]}>{item.senderName}</Text>
+                    </Pressable>
+                  )}
 
                   <View style={[styles.roleBadge, isMine ? styles.roleBadgeMine : styles.roleBadgeMod]}>
                     <Text style={[styles.roleBadgeText, isMine && { color: colors.electricAccent }]}>

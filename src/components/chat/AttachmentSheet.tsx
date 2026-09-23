@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { fonts } from '../../theme';
 
@@ -36,6 +37,7 @@ export function AttachmentSheet({
   // still animating away — the picker silently never appears. So picking an action closes the sheet
   // first and the action runs once the dismissal has finished (Modal `onDismiss`, iOS-only; other
   // platforms have no such restriction and run it right away).
+  const insets = useSafeAreaInsets();
   const pending = useRef<string | null>(null);
 
   const run = (key: string) => {
@@ -60,7 +62,7 @@ export function AttachmentSheet({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onDismiss={flush}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Pressable style={[styles.sheet, { paddingBottom: Math.max(28, insets.bottom + 16) }]} onPress={() => undefined}>
           <View style={styles.grabberRow}>
             <View style={styles.grabber} />
           </View>
@@ -90,7 +92,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
     paddingHorizontal: 16,
-    paddingBottom: 28,
   },
   grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 10 },
   grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255, 255, 255, 0.2)' },

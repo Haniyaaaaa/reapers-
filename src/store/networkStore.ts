@@ -27,6 +27,7 @@ type NetworkState = {
   fetchTeams: (userId: string, filters?: networkApi.TeamRequestFilters, opts?: FetchOpts) => Promise<void>;
   loadMoreTeams: () => Promise<void>;
   connectPerson: (myUserId: string, otherUserId: string) => Promise<void>;
+  cancelConnectionRequest: (myUserId: string, otherUserId: string) => Promise<void>;
   postTeam: (posterId: string, req: networkApi.TeamRequestInput) => Promise<void>;
   applyTeam: (userId: string, teamRequestId: string) => Promise<void>;
   fetchApplicants: (teamRequestId: string) => Promise<void>;
@@ -106,6 +107,18 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
     } catch (err) {
       set((s) => ({ people: s.people.map((p) => (p.id === otherUserId ? { ...p, connect: before ?? p.connect } : p)) }));
       captureException(err);
+    }
+  },
+
+  cancelConnectionRequest: async (myUserId, otherUserId) => {
+    const before = get().people.find((p) => p.id === otherUserId)?.connect;
+    set((s) => ({ people: s.people.map((p) => (p.id === otherUserId ? { ...p, connect: 'connect' } : p)) }));
+    try {
+      await networkApi.cancelConnectionRequest(myUserId, otherUserId);
+    } catch (err) {
+      set((s) => ({ people: s.people.map((p) => (p.id === otherUserId ? { ...p, connect: before ?? p.connect } : p)) }));
+      captureException(err);
+      throw err;
     }
   },
 

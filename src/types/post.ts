@@ -28,4 +28,9 @@ export interface PostComment {
   avatarUri?: string;
   text: string;
   createdAt: string;
+  /** The comment this one is replying to, if any — a flat pointer, not a nested tree. The
+   * replied-to name is resolved client-side from whatever's already loaded (see
+   * PostCommentsSheet), not carried on this row, so a reply to a comment outside the current
+   * page just shows with no tag rather than needing another round trip. */
+  parentId?: string;
 }

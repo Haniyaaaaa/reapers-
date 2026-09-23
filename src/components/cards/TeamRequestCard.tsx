@@ -50,10 +50,12 @@ export function TeamRequestCard({
         cutSize={14}
         radius={8}
         fill={colors.cardFill}
-        borderColor={colors.cardBorder}
+        borderColor="rgba(139, 92, 246, 0.28)"
         borderWidth={1}
-        style={styles.teamCardCut}
+        glass
+        style={[styles.teamCardCut, styles.teamCardGlow]}
       >
+        <View style={styles.teamAccentBar} />
         <View style={styles.teamCardInner}>
           {/* Top Badges + Match Score */}
           <View style={styles.teamTopBadgesRow}>
@@ -69,7 +71,13 @@ export function TeamRequestCard({
                 </View>
               ) : null}
             </View>
-            {owner ? null : <Text style={[styles.matchScoreText, { color: colors.text }]}>{`${score}% match`}</Text>}
+            {owner ? null : (
+              <CyberCutBox gradient cutSize={4} radius={3} style={styles.matchScoreCut}>
+                <View style={styles.matchScoreInner}>
+                  <Text style={styles.matchScoreText}>{`${score}% MATCH`}</Text>
+                </View>
+              </CyberCutBox>
+            )}
           </View>
 
           {/* Title & Studio info */}
@@ -79,7 +87,13 @@ export function TeamRequestCard({
             accessibilityRole="button"
             accessibilityLabel={`View ${team.project} poster's profile`}
           >
-            <CutAvatar source={resolveAvatarSource(team.posterAvatarUri, team.posterAvatarId)} size={44} cut={11} borderWidth={1} />
+            <CutAvatar
+              source={resolveAvatarSource(team.posterAvatarUri, team.posterAvatarId)}
+              size={44}
+              cut={11}
+              borderWidth={1.5}
+              borderColor="rgba(216, 60, 255, 0.55)"
+            />
             <View style={styles.teamTitleWrap}>
               <Text style={[styles.teamProjectTitle, { color: colors.text }]}>{team.project}</Text>
               {studioLine ? <Text style={[styles.teamStudioSubtext, { color: colors.muted }]}>{studioLine}</Text> : null}
@@ -194,8 +208,24 @@ const styles = StyleSheet.create({
   teamCardCut: {
     width: '100%',
   },
+  teamCardGlow: {
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    elevation: 6,
+  },
+  teamAccentBar: {
+    height: 2,
+    width: '38%',
+    marginLeft: 16,
+    marginTop: 14,
+    borderRadius: 2,
+    backgroundColor: '#D83CFF',
+  },
   teamCardInner: {
     padding: 16,
+    paddingTop: 10,
     gap: 14,
   },
   teamTopBadgesRow: {
@@ -235,11 +265,21 @@ const styles = StyleSheet.create({
     color: '#8E9BB5',
     letterSpacing: 0.5,
   },
+  matchScoreCut: {
+    height: 22,
+  },
+  matchScoreInner: {
+    height: '100%',
+    paddingHorizontal: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   matchScoreText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
+    fontFamily: fonts.monoBold,
+    fontSize: 9.5,
     fontWeight: '700',
     color: '#FFFFFF',
+    letterSpacing: 0.4,
   },
   teamTitleRow: {
     flexDirection: 'row',

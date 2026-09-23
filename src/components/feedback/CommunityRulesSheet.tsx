@@ -1,4 +1,5 @@
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
@@ -21,6 +22,7 @@ export function CommunityRulesSheet({
   onClose: () => void;
 }) {
   const { colors, light } = useTheme();
+  const insets = useSafeAreaInsets();
   const { run, pending } = useSingleFlight(onAgree);
   const guardedClose = () => {
     if (!pending) onClose();
@@ -29,7 +31,7 @@ export function CommunityRulesSheet({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={guardedClose}>
       <Pressable style={styles.backdrop} onPress={guardedClose}>
-        <Pressable style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => undefined}>
+        <Pressable style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: Math.max(28, insets.bottom + 16) }]} onPress={() => undefined}>
           <View style={styles.grabberRow}>
             <View style={[styles.grabber, { backgroundColor: light ? 'rgba(15, 23, 42, 0.15)' : 'rgba(255, 255, 255, 0.2)' }]} />
           </View>
@@ -72,7 +74,7 @@ export function CommunityRulesSheet({
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.6)', justifyContent: 'flex-end' },
-  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderBottomWidth: 0, padding: 20, paddingBottom: 28, maxHeight: '78%' },
+  sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, borderBottomWidth: 0, padding: 20, maxHeight: '78%' },
   grabberRow: { alignItems: 'center', marginBottom: 14 },
   grabber: { width: 36, height: 4, borderRadius: 2 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

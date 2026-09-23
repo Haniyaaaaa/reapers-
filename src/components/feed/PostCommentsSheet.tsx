@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dimensions, FlatList, Image, ImageSourcePropType, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboard } from '../../hooks/useKeyboard';
 import { InlineErrorText } from '../feedback/InlineErrorText';
 import { ConfirmSheet } from '../feedback/ConfirmSheet';
 import { LoadMoreButton } from '../feedback/LoadMoreButton';
@@ -10,6 +11,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { usePostsStore } from '../../store/postsStore';
 import { EMPTY_ARRAY } from '../../utils/emptyArray';
 import { subscribeToPostComments, subscribeToPostReactions } from '../../services/supabase/realtime';
+import { useProfilePreviewStore } from '../../store/profilePreviewStore';
 import { submitReport } from '../../services/supabase/reports';
 import { fonts, useTheme } from '../../theme';
 import type { PostComment } from '../../types/post';
@@ -63,6 +65,13 @@ export function PostCommentsSheet({
   const { user } = useAuth();
   const userId = user?.id;
   const insets = useSafeAreaInsets();
+  // KeyboardAvoidingView's 'padding' behavior is iOS-only (see below) — on Android it does
+  // nothing, and since this Modal's sheet is a fixed-height box pinned to the bottom, the
+  // keyboard just covers whatever sits at its bottom (the composer) instead of anything
+  // shifting to stay above it. Shifting the whole sheet up by the keyboard's own height fixes
+  // it on Android without touching the iOS path, which already worked.
+  const { height: keyboardHeight } = useKeyboard();
+  const androidKeyboardOffset = Platform.OS === 'android' ? keyboardHeight : 0;
 
   const sheetBg = isLight ? colors.surface : '#0E1423';
   const sheetBorder = isLight ? colors.cardBorder : 'rgba(255, 255, 255, 0.12)';
@@ -103,6 +112,8 @@ export function PostCommentsSheet({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [tray, setTray] = useState<'none' | 'emoji' | 'gif'>('none');
+  const [replyTo, setReplyTo] = useState<PostComment | null>(null);
+  const [expandedRoots, setExpandedRoots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (postId) fetchComments(postId);
@@ -132,12 +143,15 @@ export function PostCommentsSheet({
     if (!user || !postId) return;
     const body = text.trim();
     if (!body) return;
+    const replyToBackup = replyTo;
     setText('');
+    setReplyTo(null);
     setErr('');
     try {
-      await addComment(postId, user.id, body);
+      await addComment(postId, user.id, body, replyToBackup?.id);
     } catch (e) {
       setText(body);
+      setReplyTo(replyToBackup);
       setErr(e instanceof Error ? e.message : 'Could not post comment — try again.');
     }
   };
@@ -179,32 +193,142 @@ export function PostCommentsSheet({
     setEditingCommentId(null);
   };
 
-  const renderComment = ({ item }: { item: PostComment }) => {
+  // Real (but shallow) nesting: a reply renders directly under the comment it answers instead
+  // of wherever it happens to fall chronologically, and gets a left indent + connector so it
+  // reads as a thread. Capped at one visual level — a reply to a reply still nests under the
+  // ORIGINAL top-level comment (with a "Replying to X" tag naming who it was actually aimed
+  // at, since the indent alone can't show that) rather than indenting further, which is what
+  // keeps this O(n) and the layout from ever spiraling into a real recursive tree.
+  const threaded = useMemo(() => {
+    const byId = new Map(comments.map((c) => [c.id, c]));
+    const rootOf = (c: PostComment): string => {
+      let cur = c;
+      const seen = new Set<string>();
+      while (cur.parentId && byId.has(cur.parentId) && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        cur = byId.get(cur.parentId)!;
+      }
+      return cur.id;
+    };
+    const childrenOfRoot = new Map<string, PostComment[]>();
+    const roots: PostComment[] = [];
+    for (const c of comments) {
+      if (!c.parentId || !byId.has(c.parentId)) {
+        roots.push(c);
+      } else {
+        const rootId = rootOf(c);
+        const list = childrenOfRoot.get(rootId) ?? [];
+        list.push(c);
+        childrenOfRoot.set(rootId, list);
+      }
+    }
+    type Row =
+      | { kind: 'comment'; comment: PostComment; isReply: boolean }
+      | { kind: 'toggle'; rootId: string; count: number };
+    const rows: Row[] = [];
+    for (const root of roots) {
+      rows.push({ kind: 'comment', comment: root, isReply: false });
+      const kids = (childrenOfRoot.get(root.id) ?? []).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      if (kids.length > 0) {
+        rows.push({ kind: 'toggle', rootId: root.id, count: kids.length });
+        if (expandedRoots.has(root.id)) {
+          for (const kid of kids) rows.push({ kind: 'comment', comment: kid, isReply: true });
+        }
+      }
+    }
+    return rows;
+  }, [comments, expandedRoots]);
+
+  const toggleReplies = (rootId: string) => {
+    setExpandedRoots((s) => {
+      const next = new Set(s);
+      if (next.has(rootId)) next.delete(rootId);
+      else next.add(rootId);
+      return next;
+    });
+  };
+
+  const renderComment = ({
+    item: row,
+  }: {
+    item: { kind: 'comment'; comment: PostComment; isReply: boolean } | { kind: 'toggle'; rootId: string; count: number };
+  }) => {
+    if (row.kind === 'toggle') {
+      const expanded = expandedRoots.has(row.rootId);
+      return (
+        <Pressable onPress={() => toggleReplies(row.rootId)} style={styles.toggleRepliesRow} accessibilityRole="button">
+          <View style={[styles.toggleLine, { backgroundColor: dividerBorder }]} />
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={13} color={isLight ? colors.primary : '#00E5FF'} />
+          <Text style={[styles.toggleRepliesText, { color: isLight ? colors.primary : '#00E5FF' }]}>
+            {expanded ? 'Hide replies' : `${row.count} ${row.count === 1 ? 'reply' : 'replies'}`}
+          </Text>
+        </Pressable>
+      );
+    }
+    const item = row.comment;
     const gifUri = parseGifComment(item.text);
-    return (
-    <View style={styles.commentRow}>
-      <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId)} size={32} cut={8} borderWidth={1} />
-      <View style={styles.commentBody}>
-        <View style={styles.commentUserRow}>
-          <Text style={[styles.commentUser, { color: commentUserColor }]}>{item.userName}</Text>
-          <Text style={[styles.commentTime, { color: commentTimeColor }]}>{formatTime(item.createdAt)}</Text>
-          {item.userId === user?.id ? (
-            <View style={styles.commentOwnActions}>
-              {gifUri ? null : (
-                <Pressable onPress={() => startEditingComment(item)} hitSlop={8}>
-                  <Ionicons name="create-outline" size={16} color={isLight ? colors.primary : '#00E5FF'} />
-                </Pressable>
-              )}
-              <Pressable onPress={() => setDeleteCommentId(item.id)} hitSlop={8}>
-                <Ionicons name="trash-outline" size={16} color="#FF4D6D" />
+    // Only shown when nested under someone other than who it's visually indented beneath —
+    // i.e. a reply-to-a-reply, where the indent alone doesn't say who it was aimed at.
+    const directParent = item.parentId ? comments.find((c) => c.id === item.parentId) : undefined;
+    const replyName = row.isReply && directParent && directParent.parentId ? directParent.userName : undefined;
+    const actions = (
+      <View style={styles.commentActionsRow}>
+        <Pressable onPress={() => setReplyTo(item)} hitSlop={8}>
+          <Ionicons name="arrow-undo-outline" size={14} color={iconColor} />
+        </Pressable>
+        {item.userId === user?.id ? (
+          <View style={styles.commentOwnActions}>
+            {gifUri ? null : (
+              <Pressable onPress={() => startEditingComment(item)} hitSlop={8}>
+                <Ionicons name="create-outline" size={15} color={isLight ? colors.primary : '#00E5FF'} />
               </Pressable>
-            </View>
-          ) : (
-            <Pressable onPress={() => setReportTarget({ type: 'post_comment', id: item.id })} hitSlop={8}>
-              <Ionicons name="ellipsis-horizontal" size={14} color={iconColor} />
+            )}
+            <Pressable onPress={() => setDeleteCommentId(item.id)} hitSlop={8}>
+              <Ionicons name="trash-outline" size={15} color="#FF4D6D" />
             </Pressable>
-          )}
-        </View>
+          </View>
+        ) : (
+          <Pressable onPress={() => setReportTarget({ type: 'post_comment', id: item.id })} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={13} color={iconColor} />
+          </Pressable>
+        )}
+      </View>
+    );
+    return (
+    <View style={[styles.commentRow, row.isReply && styles.commentRowReply]}>
+      {row.isReply ? <View style={[styles.threadLine, { backgroundColor: dividerBorder }]} /> : null}
+      <Pressable onPress={() => useProfilePreviewStore.getState().open(item.userId)} accessibilityRole="button" accessibilityLabel={`View ${item.userName}'s profile`}>
+        <CutAvatar source={resolveAvatarSource(item.avatarUri, item.avatarId)} size={row.isReply ? 26 : 32} cut={row.isReply ? 6 : 8} borderWidth={1} />
+      </Pressable>
+      <View style={styles.commentBody}>
+        {replyName ? (
+          <View style={styles.replyTagRow}>
+            <Ionicons name="arrow-undo" size={10} color={iconColor} />
+            <Text style={[styles.replyTagText, { color: iconColor }]} numberOfLines={1}>Replying to {replyName}</Text>
+          </View>
+        ) : null}
+        {row.isReply ? (
+          // Narrower row (indent + smaller avatar eats into the width) — name gets its own
+          // line so the date/actions line never has to squeeze in beside a long name and wrap
+          // mid-string, which is what happened when this shared the root layout.
+          <>
+            <Pressable onPress={() => useProfilePreviewStore.getState().open(item.userId)}>
+              <Text style={[styles.commentUser, { color: commentUserColor }]} numberOfLines={1}>{item.userName}</Text>
+            </Pressable>
+            <View style={styles.commentUserRow}>
+              <Text style={[styles.commentTime, { color: commentTimeColor }]} numberOfLines={1}>{formatTime(item.createdAt)}</Text>
+              {actions}
+            </View>
+          </>
+        ) : (
+          <View style={styles.commentUserRow}>
+            <Pressable onPress={() => useProfilePreviewStore.getState().open(item.userId)} style={{ flexShrink: 1 }}>
+              <Text style={[styles.commentUser, { color: commentUserColor }]} numberOfLines={1}>{item.userName}</Text>
+            </Pressable>
+            <Text style={[styles.commentTime, { color: commentTimeColor }]} numberOfLines={1}>{formatTime(item.createdAt)}</Text>
+            {actions}
+          </View>
+        )}
 
         {editingCommentId === item.id ? (
           <View style={styles.editCommentWrap}>
@@ -245,7 +369,7 @@ export function PostCommentsSheet({
   return (
     <Modal visible={!!postId} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={onClose}>
-        <Pressable style={[styles.sheet, { height: SHEET_HEIGHT, backgroundColor: sheetBg, borderColor: sheetBorder }]} onPress={() => undefined}>
+        <Pressable style={[styles.sheet, { height: SHEET_HEIGHT, backgroundColor: sheetBg, borderColor: sheetBorder, marginBottom: androidKeyboardOffset }]} onPress={() => undefined}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <View style={styles.grabberRow}>
               <View style={[styles.grabber, { backgroundColor: grabberBg }]} />
@@ -274,13 +398,25 @@ export function PostCommentsSheet({
 
             <FlatList
               keyboardShouldPersistTaps="handled"
-              data={comments}
-              keyExtractor={(c) => c.id}
+              data={threaded}
+              keyExtractor={(row) => (row.kind === 'toggle' ? `toggle-${row.rootId}` : row.comment.id)}
               renderItem={renderComment}
               contentContainerStyle={styles.list}
               ListEmptyComponent={!loading ? <Text style={[styles.emptyText, { color: emptyTextColor }]}>No comments yet — be the first.</Text> : null}
               ListFooterComponent={<LoadMoreButton hasMore={hasMore} onPress={() => postId && loadMoreComments(postId)} />}
             />
+
+            {replyTo ? (
+              <View style={[styles.replyBar, { borderTopColor: dividerBorder, backgroundColor: inputBg }]}>
+                <Ionicons name="arrow-undo" size={13} color={isLight ? colors.primary : '#00E5FF'} />
+                <Text style={[styles.replyBarText, { color: commentTextColor }]} numberOfLines={1}>
+                  Replying to <Text style={{ color: commentUserColor, fontFamily: fonts.bodySemi }}>{replyTo.userName}</Text>
+                </Text>
+                <Pressable onPress={() => setReplyTo(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel reply">
+                  <Ionicons name="close" size={16} color={iconColor} />
+                </Pressable>
+              </View>
+            ) : null}
 
             {posting ? <Text style={[styles.postingText, { color: iconColor }]}>Posting…</Text> : null}
             {err ? <InlineErrorText message={err} /> : null}
@@ -396,6 +532,8 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, flexGrow: 1 },
   emptyText: { color: '#8E9BB5', fontFamily: fonts.body, textAlign: 'center', marginTop: 20 },
   commentRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  commentRowReply: { marginLeft: 30, marginTop: -4, position: 'relative' },
+  threadLine: { position: 'absolute', left: -20, top: -10, bottom: 20, width: 1.5 },
   commentAvatarWrap: { width: 32, height: 32, borderRadius: 16, overflow: 'hidden' },
   commentAvatarImg: { width: '100%', height: '100%' },
   commentBody: { flex: 1 },
@@ -404,6 +542,14 @@ const styles = StyleSheet.create({
   commentTime: { fontFamily: fonts.mono, fontSize: 10, flex: 1, color: '#8E9BB5' },
   commentText: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18, marginTop: 2, color: '#A6B4CE' },
   commentOwnActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  replyTagRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  replyTagText: { fontFamily: fonts.body, fontSize: 10.5 },
+  commentActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  toggleRepliesRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 42, marginTop: -6, marginBottom: 14 },
+  toggleLine: { width: 16, height: 1.5 },
+  toggleRepliesText: { fontFamily: fonts.bodySemi, fontSize: 12 },
+  replyBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: 1 },
+  replyBarText: { flex: 1, fontFamily: fonts.body, fontSize: 12.5 },
   editCommentWrap: { marginTop: 4 },
   editCommentInput: {
     fontFamily: fonts.body,

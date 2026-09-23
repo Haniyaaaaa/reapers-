@@ -6,7 +6,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { CutAvatar } from '../avatars/CutAvatar';
@@ -37,7 +36,7 @@ export function CyberCommunityFeaturedCard({
   onToggleJoin,
   onAction,
 }: CyberCommunityFeaturedCardProps) {
-  const { colors, gradients, isLight } = useTheme();
+  const { colors, isLight } = useTheme();
   const resolvedSource = imageUri ? { uri: imageUri } : avatarSource || getCyberAvatarSource('male_4');
 
   return (
@@ -142,17 +141,12 @@ export function CyberCommunityFeaturedCard({
                 joining first. Not-joined now reads "JOIN" and actually joins; joined opens
                 the community's chat, same as before. */}
             <Pressable onPress={joined ? onAction || onPress : onToggleJoin} style={styles.actionBtnWrap} accessibilityRole="button">
-              <CyberCutBox cutSize={8} radius={4} style={styles.actionCutBox}>
-                <LinearGradient
-                  colors={gradients.cyber}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.actionGradient}
-                >
+              <CyberCutBox gradient cutSize={8} radius={4} style={styles.actionCutBox}>
+                <View style={styles.actionGradient}>
                   <Text style={styles.actionBtnText}>
                     {joined ? 'OPEN CHAT' : 'JOIN'}
                   </Text>
-                </LinearGradient>
+                </View>
               </CyberCutBox>
             </Pressable>
           </View>

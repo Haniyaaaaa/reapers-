@@ -9,6 +9,7 @@ import { AuthTextField } from '../../../components/inputs/AuthTextField';
 import { CutAvatar } from '../../../components/avatars/CutAvatar';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
 import { resolveAvatarSource } from '../../../data/cyberAvatars';
+import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
 import { EXPERT_GOLD } from '../../../components/experts/ExpertBadge';
 import { ConfirmSheet } from '../../../components/feedback/ConfirmSheet';
 import { EmptyState } from '../../../components/feedback/EmptyState';
@@ -46,6 +47,7 @@ function BookingCard({
 }) {
   const { colors } = useTheme();
   const past = new Date(booking.startsAt).getTime() < Date.now();
+  const withWhomId = booking.role === 'requester' ? booking.expertId : booking.requesterId;
   const withWhom = booking.role === 'requester' ? booking.expertName : booking.requesterName;
   const withWhomAvatarUri = booking.role === 'requester' ? booking.expertAvatarUri : booking.requesterAvatarUri;
   const withWhomAvatarId = booking.role === 'requester' ? booking.expertAvatarId : booking.requesterAvatarId;
@@ -75,16 +77,18 @@ function BookingCard({
     <CyberCutBox cutSize={12} radius={8} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={0.88} style={styles.card}>
       <View style={styles.cardInner}>
         <View style={styles.topRow}>
-          <CutAvatar source={resolveAvatarSource(withWhomAvatarUri, withWhomAvatarId)} size={44} cut={11} borderWidth={1} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{withWhom}</Text>
-            <View style={styles.whenRow}>
-              <Ionicons name="calendar-outline" size={12} color={colors.muted} />
-              <Text style={[styles.muted, { color: colors.muted }]}>{dateLabel}</Text>
-              <Ionicons name="time-outline" size={12} color={colors.muted} style={{ marginLeft: 6 }} />
-              <Text style={[styles.muted, { color: colors.muted }]}>{timeLabel} · 15 min</Text>
+          <Pressable onPress={() => useProfilePreviewStore.getState().open(withWhomId)} style={styles.identityTouch} accessibilityRole="button" accessibilityLabel={`View ${withWhom}'s profile`}>
+            <CutAvatar source={resolveAvatarSource(withWhomAvatarUri, withWhomAvatarId)} size={44} cut={11} borderWidth={1} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{withWhom}</Text>
+              <View style={styles.whenRow}>
+                <Ionicons name="calendar-outline" size={12} color={colors.muted} />
+                <Text style={[styles.muted, { color: colors.muted }]}>{dateLabel}</Text>
+                <Ionicons name="time-outline" size={12} color={colors.muted} style={{ marginLeft: 6 }} />
+                <Text style={[styles.muted, { color: colors.muted }]}>{timeLabel} · 15 min</Text>
+              </View>
             </View>
-          </View>
+          </Pressable>
           <View style={[styles.statusPill, { borderColor: `${tone.color}66`, backgroundColor: `${tone.color}1A` }]}>
             <Text style={[styles.statusText, { color: tone.color }]}>{tone.label}</Text>
           </View>
@@ -306,6 +310,7 @@ const styles = StyleSheet.create({
   card: { width: '100%' },
   cardInner: { padding: 14, gap: 10 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  identityTouch: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   name: { fontFamily: fonts.bodySemi, fontSize: 15 },
   whenRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 },
   muted: { fontFamily: fonts.body, fontSize: 12 },
