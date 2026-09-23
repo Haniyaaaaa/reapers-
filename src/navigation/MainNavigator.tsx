@@ -38,6 +38,7 @@ import { NotificationsScreen } from '../features/profile/screens/NotificationsSc
 import { PaymentResultScreen } from '../features/profile/screens/PaymentResultScreen';
 import { ProfileScreen } from '../features/profile/screens/ProfileScreen';
 import { SettingsScreen } from '../features/profile/screens/SettingsScreen';
+import { PostDetailScreen } from '../features/home/screens/PostDetailScreen';
 import { SubscriptionScreen } from '../features/profile/screens/SubscriptionScreen';
 import { SupportScreen } from '../features/profile/screens/SupportScreen';
 import { SupportTicketDetailScreen } from '../features/profile/screens/SupportTicketDetailScreen';
@@ -69,6 +70,7 @@ export function MainNavigator() {
       <Stack.Screen name="PeopleList" component={PeopleListScreen} />
       <Stack.Screen name="Profile" component={ProfileScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="PostDetail" component={PostDetailScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="Communities" component={CommunitiesScreen} />
       <Stack.Screen name="CommunityDetail" component={CommunityDetailScreen} />

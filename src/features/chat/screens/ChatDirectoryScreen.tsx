@@ -401,7 +401,7 @@ export function ChatDirectoryScreen() {
             // The sheet stays open over this screen, so InlineErrorText rendered down in the
             // page below it was invisible — a failed join looked like tapping Join did nothing
             // at all. An alert floats above the sheet instead.
-            const message = e instanceof Error ? e.message : 'Could not join room';
+            const message = e instanceof Error ? e.message : ((e as any)?.message || 'Could not join room');
             setJoinErr(message);
             Alert.alert('Could not join', message);
           }

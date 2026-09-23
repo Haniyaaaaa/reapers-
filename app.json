@@ -20,15 +20,18 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.reapers.app",
+      "bundleIdentifier": "com.reapers.pk",
       "infoPlist": {
         "NSCameraUsageDescription": "Reapers uses your camera to take a profile photo, demo cover, or event cover image.",
         "NSPhotoLibraryUsageDescription": "Reapers needs access to your photo library to pick a profile photo, demo video/thumbnail, room icon, community logo, or event cover.",
         "NSMicrophoneUsageDescription": "Reapers needs microphone access to record voice messages in chat and audio for demo videos you upload."
-      }
+      },
+      "associatedDomains": [
+        "applinks:reapers.pk"
+      ]
     },
     "android": {
-      "package": "com.reapers.app",
+      "package": "com.reapers.pk",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
@@ -41,7 +44,23 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "reapers.pk"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

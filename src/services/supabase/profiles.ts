@@ -93,7 +93,7 @@ export async function isUsernameAvailable(username: string, excludingUserId?: st
   return (data?.length ?? 0) === 0;
 }
 
-export type ProfileStats = { connections: number; sessions: number; communities: number };
+export type ProfileStats = { connections: number; sessions: number; communities: number; events: number };
 
 /** Accepted connections, sessions delivered as an expert, and joined communities — real for
  * any profile, not just the viewer's own (see 0076_profile_stats.sql, 0081 which added
@@ -102,7 +102,12 @@ export async function getProfileStats(userId: string): Promise<ProfileStats> {
   const { data, error } = await supabase.rpc('profile_stats', { p_user_id: userId });
   if (error) throw error;
   const row = (Array.isArray(data) ? data[0] : data) as
-    | { connections_count: number; sessions_count: number; communities_count: number }
+    | { connections_count: number; sessions_count: number; communities_count: number; events_count?: number }
     | null;
-  return { connections: row?.connections_count ?? 0, sessions: row?.sessions_count ?? 0, communities: row?.communities_count ?? 0 };
+  return {
+    connections: row?.connections_count ?? 0,
+    sessions: row?.sessions_count ?? 0,
+    communities: row?.communities_count ?? 0,
+    events: row?.events_count ?? 0,
+  };
 }

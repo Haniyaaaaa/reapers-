@@ -243,7 +243,7 @@ export function EventDetailScreen() {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Check out ${event.title} on Reapers! ${event.description || ''}`,
+        message: `Check out ${event.title} on Reapers! ${event.description || ''}\n\nhttps://reapers.pk/events/${event.id}`,
       });
     } catch {}
   };

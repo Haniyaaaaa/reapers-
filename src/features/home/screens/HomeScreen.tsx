@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CompositeNavigationProp, useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -737,8 +738,13 @@ export function HomeScreen() {
                   joined={c.joined}
                   onJoin={async () => {
                     if (!user) return;
-                    if (c.joined) await leaveCommunity(user.id, c.id);
-                    else await joinCommunity(user.id, c.id);
+                    try {
+                      if (c.joined) await leaveCommunity(user.id, c.id);
+                      else await joinCommunity(user.id, c.id);
+                    } catch (e) {
+                      const message = e instanceof Error ? e.message : ((e as any)?.message || 'Could not update membership');
+                      Alert.alert('Error', message);
+                    }
                   }}
                   onPress={() => nav.navigate('CommunityDetail', { id: c.id })}
                 />
@@ -863,16 +869,18 @@ export function HomeScreen() {
               }
             }}
             onToggleReaction={(postId, emoji) => user && reactToPost(postId, emoji, user.id)}
-            onOpenComments={(postId) => setCommentsPostId(postId)}
+            onOpenComments={(postId) => nav.navigate('PostDetail', { id: postId })}
+            onPostPress={(postId) => nav.navigate('PostDetail', { id: postId })}
             onShare={(post) => {
               // Share.share's `url` field only actually attaches media on iOS (RN's own
               // limitation) — folding the media link into the message text is what actually
               // carries it through on Android too, same as EventDetailScreen/DemoDetailScreen's
               // own share text already does for their own media/links.
+              const deepLink = `https://reapers.pk/post/${post.id}`;
               const parts = [
                 `${post.authorName} on Reapers:`,
                 post.content || (post.kind === 'photo' ? 'Shared a photo' : 'Shared an update'),
-                post.mediaUrl,
+                deepLink,
               ].filter(Boolean);
               Share.share({ message: parts.join('\n\n'), url: post.mediaUrl });
             }}
@@ -900,7 +908,7 @@ export function HomeScreen() {
             onClose={() => setDeletePostId(null)}
             onConfirm={() => { if (user && deletePostId) deletePostAction(deletePostId, user.id); setDeletePostId(null); }}
           />
-          <PostCommentsSheet postId={commentsPostId} onClose={() => setCommentsPostId(null)} userAvatarSource={currentAvatar.source} />
+
 
           {/* ================= 9. TEAM OPPORTUNITIES ================= */}
           {renderSectionHeader('Team opportunities', () => nav.navigate('Network'))}

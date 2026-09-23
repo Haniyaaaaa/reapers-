@@ -135,8 +135,8 @@ export async function deleteCommunity(id: string): Promise<void> {
 export async function joinCommunity(userId: string, communityId: string): Promise<void> {
   const { error } = await supabase
     .from('community_members')
-    .upsert({ community_id: communityId, user_id: userId }, { onConflict: 'community_id,user_id', ignoreDuplicates: true });
-  if (error) throw error;
+    .insert({ community_id: communityId, user_id: userId });
+  if (error && error.code !== '23505') throw error;
 }
 
 export async function leaveCommunity(userId: string, communityId: string): Promise<void> {

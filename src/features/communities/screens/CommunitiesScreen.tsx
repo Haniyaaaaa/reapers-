@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   View,
+  Alert,
 } from 'react-native';
 import { CompositeNavigationProp, useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -554,10 +555,15 @@ export function CommunitiesScreen() {
         visible={!!pendingJoin}
         communityName={pendingJoin?.name}
         rules={pendingJoin?.rules}
-        onAccept={() => {
+        onAccept={async () => {
           if (!user || !pendingJoin) return;
           markGuidelinesSeen(pendingJoin.id);
-          joinCommunity(user.id, pendingJoin.id);
+          try {
+            await joinCommunity(user.id, pendingJoin.id);
+          } catch (e) {
+            const message = e instanceof Error ? e.message : ((e as any)?.message || 'Could not join community');
+            Alert.alert('Could not join', message);
+          }
           setPendingJoin(null);
         }}
         onClose={() => setPendingJoin(null)}
