@@ -31,7 +31,7 @@
       ]
     },
     "android": {
-      "package": "com.reapers.pk",
+      "package": "com.reapers.app",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
