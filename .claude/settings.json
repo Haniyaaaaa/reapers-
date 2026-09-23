@@ -4,7 +4,8 @@
       "Bash(pnpm why *)",
       "Bash(python3 -)",
       "Bash(pnpm exec *)",
-      "Bash(grep -v \"Update available\\\\|pnpm\\\\|╭\\\\|│\\\\|╰\\\\|^$\")"
+      "Bash(grep -v \"Update available\\\\|pnpm\\\\|╭\\\\|│\\\\|╰\\\\|^$\")",
+      "Bash(npx tsc *)"
     ]
   },
   "enabledPlugins": {

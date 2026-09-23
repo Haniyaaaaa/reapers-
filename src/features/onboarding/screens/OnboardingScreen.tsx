@@ -39,20 +39,68 @@ import { KeyboardAwareScrollView } from '../../../components/layout/KeyboardAwar
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = Math.min(SCREEN_WIDTH - 40, 420);
 
+const TAG_SECTION_LABELS: Record<string, string> = { engines: 'ENGINES', languages: 'LANGUAGES', disciplines: 'YOUR ROLE', systems: 'SPECIALTY' };
+
 const TAG_SECTIONS = {
-  engines: ['UNITY', 'UNREAL ENGINE', 'GODOT', 'BEVY', 'CUSTOM ENGINE'],
-  languages: ['C#', 'C++', 'RUST', 'GDSCRIPT', 'LUA', 'PYTHON', 'TYPESCRIPT'],
+  engines: [
+    'UNITY',
+    'UNREAL ENGINE',
+    'GODOT',
+    'GAMEMAKER',
+    'CONSTRUCT',
+    'RPG MAKER',
+    'CRYENGINE',
+    'BEVY',
+    'ROBLOX STUDIO',
+    'COCOS2D',
+    'CUSTOM ENGINE',
+  ],
+  languages: [
+    'C++',
+    'C#',
+    'GDSCRIPT',
+    'LUA',
+    'RUST',
+    'PYTHON',
+    'JAVASCRIPT',
+    'TYPESCRIPT',
+    'JAVA',
+    'SWIFT',
+    'KOTLIN',
+    'BLUEPRINTS',
+  ],
+  // "Your Role"
   disciplines: [
+    'PROGRAMMER',
     '3D ARTIST',
     '2D ARTIST',
-    'UI/UX',
+    'UI/UX DESIGNER',
     'GAME DESIGNER',
+    'LEVEL DESIGNER',
     'SOUND DESIGNER',
+    'COMPOSER',
     'ANIMATOR',
     'TECHNICAL ARTIST',
+    'WRITER / NARRATIVE DESIGNER',
+    'VFX ARTIST',
+    'QA TESTER',
     'PRODUCER',
+    'COMMUNITY MANAGER',
   ],
-  systems: ['NETCODE', 'GAMEPLAY SYSTEMS', 'SHADERS', 'TOOLS', 'AI', 'PHYSICS'],
+  // "Specialty"
+  systems: [
+    'GAMEPLAY SYSTEMS',
+    'NETCODE / MULTIPLAYER',
+    'GRAPHICS & RENDERING',
+    'SHADERS',
+    'AI',
+    'PHYSICS',
+    'TOOLS PROGRAMMING',
+    'BACKEND / SERVER',
+    'PROCEDURAL GENERATION',
+    'PERFORMANCE OPTIMIZATION',
+    'MOBILE OPTIMIZATION',
+  ],
 };
 
 export function OnboardingScreen() {
@@ -89,6 +137,7 @@ export function OnboardingScreen() {
   // Game Developer: "What genre are you into?" (profiles.interests)
   const [selectedGenres, setSelectedGenres] = useState<string[]>(user?.interests ?? []);
   const [customTag, setCustomTag] = useState('');
+  const [customGenre, setCustomGenre] = useState('');
 
   const [showAvatarBuilderModal, setShowAvatarBuilderModal] = useState(false);
   const [userErr, setUserErr] = useState('');
@@ -192,6 +241,15 @@ export function OnboardingScreen() {
     if (!v || v.length > 24) return;
     setSelectedTags((cur) => (cur.includes(v) ? cur : [...cur, v]));
     setCustomTag('');
+    if (skillsErr) setSkillsErr('');
+  };
+
+  const addCustomGenre = (forGamer: boolean) => {
+    const v = customGenre.trim();
+    if (!v || v.length > 24) return;
+    if (forGamer) setSelectedGames((cur) => (cur.includes(v) ? cur : [...cur, v]));
+    else setSelectedGenres((cur) => (cur.includes(v) ? cur : [...cur, v]));
+    setCustomGenre('');
     if (skillsErr) setSkillsErr('');
   };
 
@@ -686,6 +744,28 @@ export function OnboardingScreen() {
                         {genreOptions.map((g) => (
                           <CyberChip key={g} label={g} selected={selectedGames.includes(g)} onPress={() => toggleGame(g)} />
                         ))}
+                        {selectedGames.filter((g) => !genreOptions.includes(g)).map((g) => (
+                          <CyberChip key={g} label={g} selected onPress={() => toggleGame(g)} />
+                        ))}
+                      </View>
+                      <Text style={[styles.categoryTitle, { color: colors.muted2, marginTop: 8 }]}>ADD YOUR OWN</Text>
+                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <CyberTextField
+                            label=""
+                            containerStyle={{ marginBottom: 0 }}
+                            value={customGenre}
+                            onChangeText={setCustomGenre}
+                            onSubmitEditing={() => addCustomGenre(true)}
+                            placeholder="e.g. Metroidvania, Looter Shooter"
+                            maxLength={24}
+                          />
+                        </View>
+                        <Pressable onPress={() => addCustomGenre(true)} accessibilityRole="button" style={{ height: 48, width: 76 }}>
+                          <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={{ fontFamily: fonts.monoBold, fontSize: 12, letterSpacing: 0.8, color: '#FFFFFF' }}>ADD</Text>
+                          </CyberCutBox>
+                        </Pressable>
                       </View>
                     </>
                   )}
@@ -711,7 +791,7 @@ export function OnboardingScreen() {
                       {isDev
                         ? (Object.keys(TAG_SECTIONS) as (keyof typeof TAG_SECTIONS)[]).map((section) => (
                             <View key={section}>
-                              <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>{section.toUpperCase()}</Text>
+                              <Text style={[styles.categoryTitle, { color: colors.muted2 }]}>{TAG_SECTION_LABELS[section] ?? section.toUpperCase()}</Text>
                               <View style={styles.chipRow}>
                                 {TAG_SECTIONS[section].map((t) => (
                                   <CyberChip key={t} label={t} selected={selectedTags.includes(t)} onPress={() => toggleTag(t)} />
@@ -770,6 +850,28 @@ export function OnboardingScreen() {
                         {genreOptions.map((g) => (
                           <CyberChip key={g} label={g} selected={selectedGenres.includes(g)} onPress={() => toggleGenre(g)} />
                         ))}
+                        {selectedGenres.filter((g) => !genreOptions.includes(g)).map((g) => (
+                          <CyberChip key={g} label={g} selected onPress={() => toggleGenre(g)} />
+                        ))}
+                      </View>
+                      <Text style={[styles.categoryTitle, { color: colors.muted2, marginTop: 8 }]}>ADD YOUR OWN</Text>
+                      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <CyberTextField
+                            label=""
+                            containerStyle={{ marginBottom: 0 }}
+                            value={customGenre}
+                            onChangeText={setCustomGenre}
+                            onSubmitEditing={() => addCustomGenre(false)}
+                            placeholder="e.g. Metroidvania, Looter Shooter"
+                            maxLength={24}
+                          />
+                        </View>
+                        <Pressable onPress={() => addCustomGenre(false)} accessibilityRole="button" style={{ height: 48, width: 76 }}>
+                          <CyberCutBox gradient cutSize={8} radius={4} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={{ fontFamily: fonts.monoBold, fontSize: 12, letterSpacing: 0.8, color: '#FFFFFF' }}>ADD</Text>
+                          </CyberCutBox>
+                        </Pressable>
                       </View>
                     </>
                   )}

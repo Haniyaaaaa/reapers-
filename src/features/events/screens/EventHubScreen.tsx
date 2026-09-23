@@ -184,15 +184,10 @@ export function EventHubScreen() {
               accessibilityRole="button"
               accessibilityLabel="Host event"
             >
-              <CyberCutBox cutSize={8} radius={4} style={styles.hostCutBox}>
-                <LinearGradient
-                  colors={['#00E5FF', '#6D35FF', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.hostGradient}
-                >
+              <CyberCutBox gradient cutSize={8} radius={4} style={styles.hostCutBox}>
+                <View style={styles.hostGradient}>
                   <Text style={styles.hostBtnText}>+ HOST</Text>
-                </LinearGradient>
+                </View>
               </CyberCutBox>
             </Pressable>
           </View>
@@ -234,15 +229,17 @@ export function EventHubScreen() {
               accessibilityRole="button"
               accessibilityLabel="Filter events"
             >
-              <CyberCutBox cutSize={8} radius={4} style={styles.filterCutBox}>
-                <LinearGradient
-                  colors={advancedFilters ? ['#D83CFF', '#00E5FF'] : ['#00E5FF', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.filterGradient}
-                >
+              <CyberCutBox
+                gradient
+                gradientColors={advancedFilters ? ['#D83CFF', '#6D35FF', '#00E5FF'] : ['#00E5FF', '#6D35FF', '#D83CFF']}
+                gradientDiagonal
+                cutSize={8}
+                radius={4}
+                style={styles.filterCutBox}
+              >
+                <View style={styles.filterGradient}>
                   <Ionicons name="options-outline" size={18} color="#FFFFFF" />
-                </LinearGradient>
+                </View>
               </CyberCutBox>
             </Pressable>
           </View>
@@ -307,15 +304,10 @@ export function EventHubScreen() {
                       accessibilityRole="button"
                     >
                       {isSel ? (
-                        <CyberCutBox cutSize={6} radius={3} style={styles.segmentActiveCut}>
-                          <LinearGradient
-                            colors={['#00E5FF', '#6D35FF', '#D83CFF']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.segmentActiveGradient}
-                          >
+                        <CyberCutBox gradient cutSize={6} radius={3} style={styles.segmentActiveCut}>
+                          <View style={styles.segmentActiveGradient}>
                             <Text style={styles.segmentTextActive}>{mode}</Text>
-                          </LinearGradient>
+                          </View>
                         </CyberCutBox>
                       ) : (
                         <View style={styles.segmentInactiveBox}>
@@ -409,15 +401,10 @@ export function EventHubScreen() {
                 style={styles.emptyActionBtn}
                 accessibilityRole="button"
               >
-                <CyberCutBox cutSize={6} radius={3} style={styles.emptyActionCut}>
-                  <LinearGradient
-                    colors={['#00E5FF', '#6D35FF', '#D83CFF']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.emptyActionGradient}
-                  >
+                <CyberCutBox gradient cutSize={6} radius={3} style={styles.emptyActionCut}>
+                  <View style={styles.emptyActionGradient}>
                     <Text style={styles.emptyActionText}>Host an Event</Text>
-                  </LinearGradient>
+                  </View>
                 </CyberCutBox>
               </Pressable>
             </CyberCutBox>

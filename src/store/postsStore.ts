@@ -39,10 +39,10 @@ type PostsState = {
 
   fetchComments: (postId: string) => Promise<void>;
   loadMoreComments: (postId: string) => Promise<void>;
-  addComment: (postId: string, userId: string, text: string) => Promise<void>;
+  addComment: (postId: string, userId: string, text: string, parentId?: string) => Promise<void>;
   deleteComment: (postId: string, commentId: string, userId: string) => Promise<void>;
   editComment: (postId: string, commentId: string, userId: string, text: string) => Promise<void>;
-  handleRealtimeComment: (row: { id: string; post_id: string; user_id: string; text: string; created_at: string }) => void;
+  handleRealtimeComment: (row: { id: string; post_id: string; user_id: string; text: string; created_at: string; parent_id?: string | null }) => void;
 };
 
 export const usePostsStore = create<PostsState>((set, get) => ({
@@ -254,9 +254,9 @@ export const usePostsStore = create<PostsState>((set, get) => ({
     }
   },
 
-  addComment: async (postId, userId, text) => {
+  addComment: async (postId, userId, text, parentId) => {
     try {
-      const comment = await postsApi.addComment(postId, userId, text);
+      const comment = await postsApi.addComment(postId, userId, text, parentId);
       set((s) => ({
         comments: { ...s.comments, [postId]: [comment, ...(s.comments[postId] ?? [])] },
         posts: s.posts.map((p) => (p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p)),
@@ -301,7 +301,7 @@ export const usePostsStore = create<PostsState>((set, get) => ({
     set((s) => {
       const existing = s.comments[row.post_id] ?? [];
       if (existing.some((c) => c.id === row.id)) return s;
-      const comment: PostComment = { id: row.id, postId: row.post_id, userId: row.user_id, userName: 'Someone', text: row.text, createdAt: row.created_at };
+      const comment: PostComment = { id: row.id, postId: row.post_id, userId: row.user_id, userName: 'Someone', text: row.text, createdAt: row.created_at, parentId: row.parent_id ?? undefined };
       return {
         comments: { ...s.comments, [row.post_id]: [comment, ...existing] },
         posts: s.posts.map((p) => (p.id === row.post_id ? { ...p, commentCount: p.commentCount + 1 } : p)),

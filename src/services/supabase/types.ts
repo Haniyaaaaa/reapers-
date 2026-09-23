@@ -262,8 +262,8 @@ export type Database = {
         Relationships: [];
       };
       post_comments: {
-        Row: { id: string; post_id: string; user_id: string; text: string; created_at: string };
-        Insert: { post_id: string; user_id: string; text: string };
+        Row: { id: string; post_id: string; user_id: string; text: string; created_at: string; parent_id: string | null };
+        Insert: { post_id: string; user_id: string; text: string; parent_id?: string | null };
         Update: { text?: string };
         Relationships: [];
       };

@@ -1,4 +1,5 @@
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CyberCutBox } from '../cyber/CyberCutBox';
 import { fonts, useTheme } from '../../theme';
 import { useSingleFlight } from '../../hooks/useSingleFlight';
@@ -32,6 +33,7 @@ export function ConfirmSheet({
   danger?: boolean;
 }) {
   const { colors, light } = useTheme();
+  const insets = useSafeAreaInsets();
   const { run, pending } = useSingleFlight(onConfirm);
   // A label that already reads as a status ("Booking…") is kept; otherwise show a generic one.
   const workingLabel = confirmLabel.endsWith('…') ? confirmLabel : 'Working…';
@@ -45,7 +47,7 @@ export function ConfirmSheet({
         <Pressable
           style={[
             styles.sheet,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { backgroundColor: colors.surface, borderColor: colors.border, paddingBottom: Math.max(28, insets.bottom + 16) },
           ]}
           onPress={() => undefined}
         >
@@ -108,7 +110,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     borderTopWidth: 1,
     paddingHorizontal: 24,
-    paddingBottom: 28,
+    // paddingBottom set inline — needs the device's safe-area inset (gesture bar / home
+    // indicator), which isn't known until render.
   },
   grabberRow: { alignItems: 'center', paddingTop: 8, paddingBottom: 16 },
   grabber: { width: 36, height: 4, borderRadius: 2 },

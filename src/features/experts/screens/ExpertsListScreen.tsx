@@ -7,6 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 
 import type { MainStackParamList } from '../../../navigation/types';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { CyberTabPill } from '../../../components/cyber/CyberTabPill';
 import { ExpertListCard } from '../../../components/cards/ExpertListCard';
 import { EmptyState } from '../../../components/feedback/EmptyState';
 import { LoadMoreButton } from '../../../components/feedback/LoadMoreButton';
@@ -115,24 +116,11 @@ export function ExpertsListScreen() {
 
       {!isRecommended ? (
         <KeyboardAwareScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
-          {FILTERS.map((item) => {
-            const active = filter === item;
-            return (
-              <Pressable key={item} onPress={() => setFilter(item)} style={styles.chipPressable} accessibilityRole="button">
-                {active ? (
-                  <LinearGradient colors={['#00F0FF', '#7928CA', '#D83CFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.activeChipGradient}>
-                    <Text style={styles.activeChipText}>{item.toUpperCase()}</Text>
-                  </LinearGradient>
-                ) : (
-                  <CyberCutBox cutSize={8} radius={4} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.inactiveChipCut}>
-                    <View style={styles.inactiveChipInner}>
-                      <Text style={[styles.inactiveChipText, { color: colors.muted }]}>{item.toUpperCase()}</Text>
-                    </View>
-                  </CyberCutBox>
-                )}
-              </Pressable>
-            );
-          })}
+          {FILTERS.map((item) => (
+            <View key={item} style={styles.chipPressable}>
+              <CyberTabPill label={item.toUpperCase()} active={filter === item} onPress={() => setFilter(item)} />
+            </View>
+          ))}
         </KeyboardAwareScrollView>
       ) : null}
 

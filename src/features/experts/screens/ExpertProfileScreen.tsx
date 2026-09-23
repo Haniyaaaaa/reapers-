@@ -24,6 +24,7 @@ import { InlineErrorText } from '../../../components/feedback/InlineErrorText';
 import { Skeleton } from '../../../components/feedback/Skeleton';
 import { PrimaryButton } from '../../../components/buttons/PrimaryButton';
 import { resolveAvatarSource } from '../../../data/cyberAvatars';
+import { useProfilePreviewStore } from '../../../store/profilePreviewStore';
 import { useAuth } from '../../../hooks/useAuth';
 import { useRefreshControl } from '../../../hooks/useRefreshControl';
 import { useExpertStore } from '../../../store/expertStore';
@@ -301,7 +302,12 @@ export function ExpertProfileScreen() {
             {reviews.map((r) => (
               <CyberCutBox key={r.id} cutSize={10} radius={6} fill={colors.cardFill} borderColor={colors.cardBorder} borderWidth={1} style={styles.reviewCard}>
                 <View style={styles.reviewInner}>
-                  <View style={styles.reviewHeader}>
+                  <Pressable
+                    onPress={() => useProfilePreviewStore.getState().open(r.reviewerId)}
+                    style={styles.reviewHeader}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View ${r.reviewerName}'s profile`}
+                  >
                     <CutAvatar source={resolveAvatarSource(r.reviewerAvatarUri, r.reviewerAvatarId)} size={34} cut={9} borderWidth={1} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.reviewName, { color: colors.text }]} numberOfLines={1}>{r.reviewerName}</Text>
@@ -314,7 +320,7 @@ export function ExpertProfileScreen() {
                     <Text style={[styles.reviewDate, { color: colors.muted2 }]}>
                       {new Date(r.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </Text>
-                  </View>
+                  </Pressable>
                   {r.comment ? <Text style={[styles.reviewComment, { color: colors.text }]}>{r.comment}</Text> : null}
                 </View>
               </CyberCutBox>

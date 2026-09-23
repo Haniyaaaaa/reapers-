@@ -5,7 +5,6 @@ import { useEffect } from 'react';
 import { SplashScreen as SplashView } from '../features/auth/screens/SplashScreen';
 import { OnboardingScreen } from '../features/onboarding/screens/OnboardingScreen';
 import { PendingApprovalScreen } from '../features/onboarding/screens/PendingApprovalScreen';
-import { ProfilePreviewSheet } from '../components/profile/ProfilePreviewSheet';
 import { AppTour } from '../features/tour/AppTour';
 import { useAuth } from '../hooks/useAuth';
 import { joinPresence, subscribeOnlineUsers } from '../services/supabase/presence';
@@ -106,7 +105,6 @@ export function RootNavigator() {
           <Stack.Screen name="Main" component={MainNavigator} />
         )}
       </Stack.Navigator>
-      <ProfilePreviewSheet />
       <AppTour enabled={inMemberApp} autoStart={!user?.isAdmin} user={user} />
     </NavigationContainer>
   );

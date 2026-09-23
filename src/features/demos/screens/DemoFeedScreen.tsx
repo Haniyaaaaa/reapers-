@@ -16,6 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import type { MainStackParamList, TabParamList } from '../../../navigation/types';
 import { CyberDemoFeedCard } from '../../../components/cards/CyberDemoFeedCard';
 import { CyberCutBox } from '../../../components/cyber/CyberCutBox';
+import { CyberTabPill } from '../../../components/cyber/CyberTabPill';
 import { EmptyState } from '../../../components/feedback/EmptyState';
 import { RetryBanner } from '../../../components/feedback/RetryBanner';
 import { Skeleton } from '../../../components/feedback/Skeleton';
@@ -170,38 +171,10 @@ export function DemoFeedScreen() {
         contentContainerStyle={styles.filterChipsRow}
       >
         {FILTERS.map((item) => {
-          const active = filter === item;
           return (
-            <Pressable
-              key={item}
-              onPress={() => setFilter(item)}
-              style={styles.chipPressable}
-              accessibilityRole="button"
-            >
-              {active ? (
-                <LinearGradient
-                  colors={['#00F0FF', '#7928CA', '#D83CFF']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.activeChipGradient}
-                >
-                  <Text style={styles.activeChipText}>{item}</Text>
-                </LinearGradient>
-              ) : (
-                <CyberCutBox
-                  cutSize={8}
-                  radius={4}
-                  fill={isLight ? 'rgba(15, 23, 42, 0.05)' : 'rgba(14, 20, 35, 0.7)'}
-                  borderColor={isLight ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255, 255, 255, 0.08)'}
-                  borderWidth={1}
-                  style={styles.inactiveChipCut}
-                >
-                  <View style={styles.inactiveChipInner}>
-                    <Text style={[styles.inactiveChipText, { color: colors.muted }]}>{item}</Text>
-                  </View>
-                </CyberCutBox>
-              )}
-            </Pressable>
+            <View key={item} style={styles.chipPressable}>
+              <CyberTabPill label={item} active={filter === item} onPress={() => setFilter(item)} />
+            </View>
           );
         })}
       </KeyboardAwareScrollView>

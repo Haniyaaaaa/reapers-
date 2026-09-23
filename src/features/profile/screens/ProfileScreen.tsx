@@ -59,6 +59,7 @@ export function ProfileScreen() {
   const peopleCards = useNetworkStore((s) => s.people);
   const fetchPeople = useNetworkStore((s) => s.fetchPeople);
   const connectPerson = useNetworkStore((s) => s.connectPerson);
+  const cancelConnectionRequest = useNetworkStore((s) => s.cancelConnectionRequest);
   const startDirectMessage = useChatStore((s) => s.startDirectMessage);
   const fetchCommunities = useCommunitiesStore((s) => s.fetchCommunities);
 
@@ -358,7 +359,26 @@ export function ProfileScreen() {
             />
           </View>
 
-          <Text style={[styles.displayNameText, { color: colors.text }, isExpert && { marginBottom: 8 }]}>{shownName}</Text>
+          <Text style={[styles.displayNameText, { color: colors.text }]}>{shownName}</Text>
+          {/* Username + roles — were only ever shown in the old preview sheet (removed earlier
+              this session in favor of linking straight to this screen); this screen itself
+              never actually displayed them, on anyone's profile, own included. */}
+          {profile?.username ? (
+            <Text
+              style={[
+                styles.usernameText,
+                { color: colors.muted },
+                isExpert && (profile?.roles ?? []).length === 0 && { marginBottom: 8 },
+              ]}
+            >
+              @{profile.username}
+            </Text>
+          ) : null}
+          {(profile?.roles ?? []).length > 0 ? (
+            <Text style={[styles.rolesText, { color: colors.primary }, isExpert && { marginBottom: 8 }]}>
+              {(profile?.roles ?? []).map((r) => r.charAt(0).toUpperCase() + r.slice(1)).join(' · ')}
+            </Text>
+          ) : null}
           {isExpert ? (
             <View style={styles.expertBadgeWrap} accessibilityLabel="Verified expert">
               <CyberCutBox
@@ -407,6 +427,16 @@ export function ProfileScreen() {
                 </View>
               </CyberCutBox>
             </Pressable>
+
+            {/* Share and Connect side by side — Connect used to sit in its own row further
+                down the page, disconnected from Share for no real reason. */}
+            {!isOwn ? (
+              <ConnectButton
+                state={conn}
+                onPress={() => params.id && user && connectPerson(user.id, params.id)}
+                onCancel={() => params.id && user && cancelConnectionRequest(user.id, params.id)}
+              />
+            ) : null}
           </View>
         </View>
 
@@ -476,10 +506,14 @@ export function ProfileScreen() {
                   (isOwn ? 'Tap Edit profile to add a short bio.' : 'No bio yet.')}
               </Text>
 
-              {/* Skill Tags */}
-              {skills.length > 0 ? (
+              {/* Skill Tags — the profile's own live skills/tags, not the `skills` state below
+                  (that one only exists to seed/hold the edit form, and for anyone other than
+                  yourself it never gets initialized at all: it's seeded once from `profile` at
+                  first render, before another person's profile has even finished loading, so it
+                  silently stayed empty forever on every profile but your own). */}
+              {(profile?.skills ?? profile?.tags ?? []).length > 0 ? (
                 <View style={styles.skillBadgesRow}>
-                  {skills.map((t) => (
+                  {(profile?.skills ?? profile?.tags ?? []).map((t) => (
                     <View key={t} style={[styles.skillPill, { backgroundColor: 'rgba(0, 229, 255, 0.08)', borderColor: 'rgba(0, 229, 255, 0.35)' }]}>
                       <Text style={[styles.skillPillText, { color: colors.cyan }]}>{t.toUpperCase()}</Text>
                     </View>
@@ -655,32 +689,29 @@ export function ProfileScreen() {
           </View>
         ) : null}
 
-        {/* Other User Actions (Connect / Message / Block) */}
-        {!isOwn && (
+        {/* Other User Actions (Message) — Connect itself now lives up top next to Share */}
+        {!isOwn && conn === 'connected' && (
           <View style={styles.otherActionsRow}>
-            <ConnectButton state={conn} onPress={() => params.id && user && connectPerson(user.id, params.id)} />
-            {conn === 'connected' && (
-              <Pressable
-                onPress={async () => {
-                  if (!user || !params.id || messaging) return;
-                  setMessaging(true);
-                  try {
-                    const roomId = await startDirectMessage(user.id, params.id, profile?.displayName ?? 'them');
-                    nav.navigate('ChatDetail', { id: roomId });
-                  } finally {
-                    setMessaging(false);
-                  }
-                }}
-                style={styles.msgBtnTouch}
-                accessibilityRole="button"
-              >
-                <CyberCutBox gradient cutSize={8} radius={4} style={{ width: 150, height: 42 }}>
-                  <View style={styles.actionBtnInner}>
-                    <Text style={styles.actionBtnText}>{messaging ? 'Opening...' : 'Start Messaging'}</Text>
-                  </View>
-                </CyberCutBox>
-              </Pressable>
-            )}
+            <Pressable
+              onPress={async () => {
+                if (!user || !params.id || messaging) return;
+                setMessaging(true);
+                try {
+                  const roomId = await startDirectMessage(user.id, params.id, profile?.displayName ?? 'them');
+                  nav.navigate('ChatDetail', { id: roomId });
+                } finally {
+                  setMessaging(false);
+                }
+              }}
+              style={styles.msgBtnTouch}
+              accessibilityRole="button"
+            >
+              <CyberCutBox gradient cutSize={8} radius={4} style={{ width: 150, height: 42 }}>
+                <View style={styles.actionBtnInner}>
+                  <Text style={styles.actionBtnText}>{messaging ? 'Opening...' : 'Start Messaging'}</Text>
+                </View>
+              </CyberCutBox>
+            </Pressable>
           </View>
         )}
 
@@ -906,6 +937,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: 0.3,
+    marginBottom: 3,
+  },
+  usernameText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  rolesText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 1,
     marginBottom: 16,
   },
   actionRow: {

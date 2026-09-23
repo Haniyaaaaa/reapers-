@@ -67,7 +67,6 @@ export function CreateCommunityScreen() {
   );
   const [category, setCategory] = useState('Engines');
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [city, setCity] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>(['UNITY', 'PLAY TESTING']);
   const [customTag, setCustomTag] = useState('');
   const [privacy, setPrivacy] = useState<'public' | 'invite_only'>('public');
@@ -132,7 +131,6 @@ export function CreateCommunityScreen() {
         name: name.trim(),
         description: description.trim(),
         logoUrl: uploadedLogoUrl,
-        location: city.trim() || undefined,
         tags: selectedTags,
         rules: rules.trim() || undefined,
       });
@@ -301,24 +299,6 @@ export function CreateCommunityScreen() {
                 placeholderTextColor={colors.muted2}
                 style={[styles.textAreaInput, { color: colors.text }]}
                 textAlignVertical="top"
-              />
-            </CyberCutBox>
-          </View>
-
-          {/* City — what the Communities location filter and search match against */}
-          <View style={styles.fieldBlock}>
-            <View style={styles.labelRow}>
-              <Text style={[styles.fieldLabel, { color: colors.muted }]}>CITY</Text>
-              <Text style={[styles.hintText, { color: colors.muted2 }]}>optional · helps people nearby find you</Text>
-            </View>
-            <CyberCutBox cutSize={10} radius={4} fill={colors.inputFill} borderColor={colors.inputBorder} borderWidth={1} style={styles.cityCut}>
-              <TextInput
-                value={city}
-                onChangeText={(v) => setCity(v.slice(0, 60))}
-                placeholder="e.g. Lahore"
-                placeholderTextColor={colors.muted2}
-                autoCorrect={false}
-                style={[styles.cityInput, { color: colors.text }]}
               />
             </CyberCutBox>
           </View>
@@ -613,17 +593,12 @@ export function CreateCommunityScreen() {
             style={styles.createSubmitBtn}
             accessibilityRole="button"
           >
-            <CyberCutBox cutSize={8} radius={4} style={styles.createSubmitCut}>
-              <LinearGradient
-                colors={['#00E5FF', '#6D35FF', '#D83CFF']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.createSubmitGradient}
-              >
+            <CyberCutBox gradient cutSize={8} radius={4} style={styles.createSubmitCut}>
+              <View style={styles.createSubmitGradient}>
                 <Text style={styles.createSubmitText}>
                   {submitting ? 'Creating...' : 'Create community'}
                 </Text>
-              </LinearGradient>
+              </View>
             </CyberCutBox>
           </Pressable>
         </View>

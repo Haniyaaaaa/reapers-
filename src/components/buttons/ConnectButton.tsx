@@ -7,8 +7,22 @@ type State = 'connect' | 'pending' | 'connected';
 
 /** Same cut-box gradient/outline convention as the rest of the app's connect buttons
  * (PersonListCard, TeamRequestCard's action row) — this one, on the profile screen itself, used
- * to be a plain magenta pill that didn't match any of them. */
-export function ConnectButton({ state, onPress }: { state: State; onPress: () => void }) {
+ * to be a plain magenta pill that didn't match any of them.
+ *
+ * Pending is tappable too — undoes a request you sent, via onCancel — instead of sitting there
+ * disabled with no way back once you've tapped Connect. Already-connected stays inert; there's
+ * no "unfriend from here" button. */
+export function ConnectButton({
+  state,
+  onPress,
+  onCancel,
+}: {
+  state: State;
+  onPress: () => void;
+  /** Required when a caller can ever show state="pending" — omit only where a pending state
+   * genuinely can't occur. */
+  onCancel?: () => void;
+}) {
   const { colors } = useTheme();
   const label = state === 'connect' ? 'Connect' : state === 'pending' ? 'Pending' : 'Connected';
 
@@ -23,6 +37,7 @@ export function ConnectButton({ state, onPress }: { state: State; onPress: () =>
   }
 
   const connected = state === 'connected';
+  const cancellable = state === 'pending' && !!onCancel;
   return (
     <CyberCutBox
       cutSize={10}
@@ -32,9 +47,16 @@ export function ConnectButton({ state, onPress }: { state: State; onPress: () =>
       borderWidth={1}
       style={styles.cut}
     >
-      <Pressable disabled style={styles.inner} accessibilityRole="button" accessibilityLabel={label}>
+      <Pressable
+        disabled={!cancellable}
+        onPress={cancellable ? onCancel : undefined}
+        style={styles.inner}
+        accessibilityRole="button"
+        accessibilityLabel={cancellable ? `${label} — tap to cancel` : label}
+      >
         {connected ? <Ionicons name="checkmark" size={15} color="#3DDC84" /> : null}
         <Text style={[styles.label, { color: connected ? '#3DDC84' : colors.muted }]}>{label}</Text>
+        {cancellable ? <Ionicons name="close" size={14} color={colors.muted} /> : null}
       </Pressable>
     </CyberCutBox>
   );

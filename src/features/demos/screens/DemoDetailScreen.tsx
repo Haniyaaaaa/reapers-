@@ -642,21 +642,21 @@ export function DemoDetailScreen() {
                 accessibilityRole="button"
               >
                 <CyberCutBox
+                  gradient
+                  gradientColors={
+                    isDark
+                      ? ['rgba(0, 240, 255, 0.2)', 'rgba(108, 60, 255, 0.25)', 'rgba(216, 60, 255, 0.3)']
+                      : ['rgba(14, 165, 233, 0.15)', 'rgba(108, 60, 255, 0.15)', 'rgba(216, 60, 255, 0.15)']
+                  }
                   cutSize={8}
                   radius={4}
-                  fill="transparent"
                   borderColor={colors.cardBorder}
                   borderWidth={1}
                   style={styles.profileCutBox}
                 >
-                  <LinearGradient
-                    colors={isDark ? ['rgba(0, 240, 255, 0.2)', 'rgba(216, 60, 255, 0.3)'] : ['rgba(14, 165, 233, 0.15)', 'rgba(216, 60, 255, 0.15)']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.profileBtnGradient}
-                  >
+                  <View style={styles.profileBtnGradient}>
                     <Text style={[styles.profileBtnText, { color: colors.primary }]}>Profile</Text>
-                  </LinearGradient>
+                  </View>
                 </CyberCutBox>
               </Pressable>
             </View>
@@ -974,24 +974,20 @@ export function DemoDetailScreen() {
           accessibilityLabel={demo.videoUrl && playing ? 'Pause demo' : 'Play demo'}
         >
           <CyberCutBox
+            gradient
+            gradientColors={['#00F0FF', '#7928CA', '#D83CFF']}
             cutSize={10}
             radius={4}
-            fill="transparent"
             borderColor="rgba(0, 240, 255, 0.6)"
             borderWidth={1}
             style={styles.playDockedCutBox}
           >
-            <LinearGradient
-              colors={['#00F0FF', '#7928CA', '#D83CFF']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.playDockedGradient}
-            >
+            <View style={styles.playDockedGradient}>
               <Ionicons name={demo.videoUrl && playing ? 'pause' : 'play'} size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
               <Text style={styles.playDockedText}>
                 {demo.videoUrl && playing ? 'Pause' : `Play demo · ${formatDuration(demo.durationSec)}`}
               </Text>
-            </LinearGradient>
+            </View>
           </CyberCutBox>
         </Pressable>
       </View>
